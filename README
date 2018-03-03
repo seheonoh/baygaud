@@ -38,7 +38,39 @@ Please proceed with the following steps. The current version of BAYGAUD has been
 
 ----------------------------------------------------------------
 + STEP 1
-: Set the paths of the directories where Multinest, CFITSIO & GSL are installed on your system. Note that Multinest should be installed in the MPIOFF mode. Please check the installation instruction of Multinest. Then, generate Makefile by running 'setup_baygaud.sh' script provided.
+
+1-1. Set the paths of the directories where Multinest, CFITSIO & GSL are installed on your system.
+
+1-2. Note that Multinest should be installed in the MPIOFF mode. Please see the following procedure:
+
+- 1) Change the file names as below (with the suffix, "_mpioff") and the module names in the source codes accordingly. 
+
+- 2) Then, compile Multinest without "-DMPI" flag as follows (Note that LAPACK library is required for installing Multinest): 
+
+	----------------------------------------------------------------------------------------------------
+	gfortran -O3 -ffree-line-length-none -fPIC -c -o kmeans_clstr_mpioff.o kmeans_clstr_mpioff.f90
+	gfortran -O3 -ffree-line-length-none -fPIC -c -o priors_mpioff.o priors_mpioff.f90
+	gfortran -O3 -ffree-line-length-none -fPIC -c -o utils1_mpioff.o utils1_mpioff.f90
+	gfortran -O3 -ffree-line-length-none -fPIC -c -o utils_mpioff.o utils_mpioff.f90
+	gfortran -O3 -ffree-line-length-none -fPIC -c -o xmeans_clstr_mpioff.o xmeans_clstr_mpioff.f90
+	gfortran -O3 -ffree-line-length-none -fPIC -c -o nested_mpioff.o nested_mpioff.F90
+	gfortran -O3 -ffree-line-length-none -fPIC -c -o posterior_mpioff.o posterior_mpioff.F90
+
+	ld -shared /usr/lib/liblapack.so.3 -lpthread -o libnest3_mpioff.so utils_mpioff.o utils1_mpioff.o priors_mpioff.o kmeans_clstr_mpioff.o xmeans_clstr_mpioff.o posterior_mpioff.o nested_mpioff.o
+
+	ar cr libnest3_mpioff.a utils_mpioff.o utils1_mpioff.o priors_mpioff.o kmeans_clstr_mpioff.o xmeans_clstr_mpioff.o posterior_mpioff.o nested_mpioff.o
+	----------------------------------------------------------------------------------------------------
+- 3) If no problem, "libnest3_mpioff.a" should be built in the main directory.
+
+
+1-3. Update .tcshrc
+
+- Update your .bashrc or .tcshrc (depending on the shell you use). As an example, if you use tcsh, you need to update .tcshrc file by adding a line,
+
+  setenv LD_LIBRARY_PATH /where-multinest-is-installed/MultiNest_v3.7_MPIoff:$LD_LIBRARY_PATH
+
+
+1-4. Then, generate Makefile by running 'setup_baygaud.sh' script provided.
 
 ----------------------------------------------------------------
 + STEP 2
