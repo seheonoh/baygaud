@@ -1,0 +1,31 @@
+
+1. first compile multinest with DMPI off without editing the source codes execpt for their module names (see the source headers..)
+
+2. compile with the script, multinest.comp.csh
+
+++++++++++++++++++
+gfortran -O3 -ffree-line-length-none -fPIC -c -o kmeans_clstr_mpioff.o kmeans_clstr_mpioff.f90
+gfortran -O3 -ffree-line-length-none -fPIC -c -o priors_mpioff.o priors_mpioff.f90
+gfortran -O3 -ffree-line-length-none -fPIC -c -o utils1_mpioff.o utils1_mpioff.f90
+gfortran -O3 -ffree-line-length-none -fPIC -c -o utils_mpioff.o utils_mpioff.f90
+gfortran -O3 -ffree-line-length-none -fPIC -c -o xmeans_clstr_mpioff.o xmeans_clstr_mpioff.f90
+gfortran -O3 -ffree-line-length-none -fPIC -c -o nested_mpioff.o nested_mpioff.F90
+gfortran -O3 -ffree-line-length-none -fPIC -c -o posterior_mpioff.o posterior_mpioff.F90
+
+ld -shared /usr/lib/liblapack.so.3 -lpthread -o libnest3_mpioff.so utils_mpioff.o utils1_mpioff.o priors_mpioff.o kmeans_clstr_mpioff.o xmeans_clstr_mpioff.o posterior_mpioff.o nested_mpioff.o
+
+ar cr libnest3_mpioff.a utils_mpioff.o utils1_mpioff.o priors_mpioff.o kmeans_clstr_mpioff.o xmeans_clstr_mpioff.o posterior_mpioff.o nested_mpioff.o
+++++++++++++++++++++
+
+
+3. In bagad.gfit.c, output, a multinest parameter should be 0 not 1 for avoiding outfile confliction
+
+4. for plotting triangle diagram, output can be set with 1, for a given profile, which is then used for making plots.
+
+
+5. update .tcshrc 
+
+setenv LD_LIBRARY_PATH /mnt/g0/research/packages/multinest/MultiNest_v3.7_MPIoff:$LD_LIBRARY_PATH
+
+
+ 
