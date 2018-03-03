@@ -38,7 +38,7 @@ Please proceed with the following steps. The current version of BAYGAUD has been
 
 ----------------------------------------------------------------
 + STEP 1
-: Set the paths of the directories where Multinest, CFITSIO & GSL are installed on your system, and generate Makefile by running 'setup_baygaud.sh' script provided.
+: Set the paths of the directories where Multinest, CFITSIO & GSL are installed on your system. Note that Multinest should be installed in the MPIOFF mode. Please check the installation instruction of Multinest. Then, generate Makefile by running 'setup_baygaud.sh' script provided.
 
 ----------------------------------------------------------------
 + STEP 2
