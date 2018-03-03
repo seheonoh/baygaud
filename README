@@ -3,7 +3,7 @@
 # by SE-HEON OH (KASI/ICRAR) + WALLABY KINEMATICS WORKING GROUP                          +
 # -------------------------------------------------------------------------------------- +
 # baygaud README by Se-Heon Oh
-# version 1.0 (28 Feb 2018)
+# version 1.0.0 (28 Feb 2018)
 
 # DEPENDENCIES ==============
 baygaud depends on the following external libraries, which have to be installed in prior
