@@ -102,14 +102,14 @@ void usage_baygaud()
     printf("+                                                                                        +\n");
     printf("+ A. INPUT data ------------------------------------------------------------------------ +\n");
     printf("+  [1. WORKING DIRECTORY= /home/baygaud/wdir]                                            +\n");
-	printf("+    : where the [input-cube.fits] and [input-ref-vf.fits] locates                       +\n");
+	printf("+    : where the [input-cube.fits] and [input-ref-vf.fits] locate                        +\n");
     printf("+  [2. INPUT DATA CUBE= input-cube.fits]                                                 +\n");
     printf("+  [3. INPUT 2D REFERENCE VELOITY FIELD= input-ref-vf.fits in (km/s)]                    +\n");
     printf("+  ..................................................................................... +\n");
     printf("+ B. The maximum number of Gaussian components to be decomposed ------------------------ +\n");
     printf("+  [4. N-Gauss= 4]                                                                       +\n");
     printf("+  ..................................................................................... +\n");
-    printf("+ C. AREA to extract ------------------------------------------------------------------- +\n");
+    printf("+ C. AREA to decompose ----------------------------------------------------------------- +\n");
     printf("+  [5. xlower= 0 in pixel]                                                               +\n");
     printf("+  [6. ylower= 0 in pixel]                                                               +\n");
     printf("+  [7. xupper= nax1 in pixel]                                                            +\n");

@@ -114,14 +114,14 @@ Please proceed with the following steps. The current version of BAYGAUD has been
 +                                                                                        +
 + A. INPUT data ------------------------------------------------------------------------ +
 +  [1. WORKING DIRECTORY= /home/baygaud/wdir]                                            +
-+    : where the [input-cube.fits] and [input-ref-vf.fits] locates                       +
++    : where the [input-cube.fits] and [input-ref-vf.fits] locate                        +
 +  [2. INPUT DATA CUBE= input-cube.fits]                                                 +
 +  [3. INPUT 2D REFERENCE VELOITY FIELD= input-ref-vf.fits in (km/s)]                    +
 +  ..................................................................................... +
 + B. The maximum number of Gaussian components to be decomposed ------------------------ +
 +  [4. N-Gauss= 4]                                                                       +
 +  ..................................................................................... +
-+ C. AREA to extract ------------------------------------------------------------------- +
++ C. AREA to decompose ----------------------------------------------------------------- +
 +  [5. xlower= 0 in pixel]                                                               +
 +  [6. ylower= 0 in pixel]                                                               +
 +  [7. xupper= nax1 in pixel]                                                            +
