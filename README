@@ -93,6 +93,58 @@ Please proceed with the following steps. The current version of BAYGAUD has been
 
 : Please contact Se-Heon Oh (seheonoh {at} kasi.re.kr) for any enquiries 
 
+
+
+# USAGE
+==============
+
++ -------------------------------------------------------------------------------------- +
++ Bayesian Automated GAussian Decomposer (BAGAD)                                         +
++ by SE-HEON OH (KASI/ICRAR) + WALLABY KINEMATICS WORKING GROUP                          +
++ -------------------------------------------------------------------------------------- +
++                                                                                        +
++ Development history                                                                    +
++ : V.1.0.0 28/Feb/2018                                                                  +
++                                                                                        +
++ ! USAGE ------------------------------------------------------------------------------ +
++                                                                                        +
++: mpirun -np [0. N-threads= 8] ./baygaud                                                +
++         [working-dir] [input-cube.fits] [input-ref-vf.fits]                            +
++         [N-Gauss] [xlower] [ylower] [xupper] [yupper] [output_index(e.g., 0 ~ xxx)]    +
++                                                                                        +
++ A. INPUT data ------------------------------------------------------------------------ +
++  [1. WORKING DIRECTORY= /home/baygaud/wdir]                                            +
++    : where the [input-cube.fits] and [input-ref-vf.fits] locates                       +
++  [2. INPUT DATA CUBE= input-cube.fits]                                                 +
++  [3. INPUT 2D REFERENCE VELOITY FIELD= input-ref-vf.fits in (km/s)]                    +
++  ..................................................................................... +
++ B. The maximum number of Gaussian components to be decomposed ------------------------ +
++  [4. N-Gauss= 4]                                                                       +
++  ..................................................................................... +
++ C. AREA to extract ------------------------------------------------------------------- +
++  [5. xlower= 0 in pixel]                                                               +
++  [6. ylower= 0 in pixel]                                                               +
++  [7. xupper= nax1 in pixel]                                                            +
++  [8. yupper= nax2 in pixel]                                                            +
++  ..................................................................................... +
++ D. OUTPUT directory index ------------------------------------------------------------ +
++  [9. output_index= 0 or whatever any number]                                           +
++  ------------------------------------------------------------------------------------- +
++                                                                                        +
++ ! EXAMPLE ---------------------------------------------------------------------------- +
++                                                                                        +
++ mpirun -np 4 ./baygaud \                                                               +
++ /home/seheon/baygaud.v1.0.0/baygaud/ngc2403 \                                          +
++ input-cube.fits \                                                                      +
++ input-ref-vf.fits \                                                                    +
++ 4 \                                                                                    +
++ 100 100 140 140 \                                                                      +
++ 0                                                                                      +
++                                                                                        +
++ -------------------------------------------------------------------------------------- +
+
+
+
 # git update
 #==============
 # git config --global user.name "Se-Heon Oh"
@@ -108,8 +160,8 @@ Please proceed with the following steps. The current version of BAYGAUD has been
 # REFERENCE
 ==============
 
-Robust profile decomposition of complex ISM structure and kinematics of galaxies from large HI surveys
-by Se-Heon Oh, Bi-Qing For & Lister Staveley-Smith
+Robust profile decomposition for large extragalactic spectral-line surveys 
+by Se-Heon Oh, Lister Staveley-Smith & Bi-Qing For
 
 
 
