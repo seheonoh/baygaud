@@ -128,7 +128,7 @@ Please proceed with the following steps. The current version of BAYGAUD has been
 +  [8. yupper= nax2 in pixel]                                                            +
 +  ..................................................................................... +
 + D. OUTPUT directory index ------------------------------------------------------------ +
-+  [9. output_index= 0 or whatever any number]                                           +
++  [9. output_index= 0 or any number whatever you want]                                  +
 +  ------------------------------------------------------------------------------------- +
 +                                                                                        +
 + ! EXAMPLE ---------------------------------------------------------------------------- +
@@ -142,7 +142,6 @@ Please proceed with the following steps. The current version of BAYGAUD has been
 + 0                                                                                      +
 +                                                                                        +
 + -------------------------------------------------------------------------------------- +
-
 
 
 # git update

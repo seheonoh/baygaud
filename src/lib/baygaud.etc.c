@@ -116,7 +116,7 @@ void usage_baygaud()
     printf("+  [8. yupper= nax2 in pixel]                                                            +\n");
     printf("+  ..................................................................................... +\n");
     printf("+ D. OUTPUT directory index ------------------------------------------------------------ +\n");
-    printf("+  [9. output_index= 0 or whatever any number]                                           +\n");
+    printf("+  [9. output_index= 0 or any number whatever you want]                                  +\n");
     printf("+  ------------------------------------------------------------------------------------- +\n");
     printf("+                                                                                        +\n");
     printf("+ ! EXAMPLE ---------------------------------------------------------------------------- +\n");
