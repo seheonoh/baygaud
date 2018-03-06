@@ -87,7 +87,7 @@ void read_user_input_baygaud(TR_ringParameters *TRparam, multinest_paramters *mu
 void usage_baygaud()
 {
     printf("\n+ -------------------------------------------------------------------------------------- +\n");
-    printf("+ Bayesian Automated GAussian Decomposer (BAGAD)                                         +\n");
+    printf("+ Bayesian Automated GAussian Decomposer (BAGAUD)                                        +\n");
     printf("+ by SE-HEON OH (KASI/ICRAR) + WALLABY KINEMATICS WORKING GROUP                          +\n");
     printf("+ -------------------------------------------------------------------------------------- +\n");
     printf("+                                                                                        +\n");
