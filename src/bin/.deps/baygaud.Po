@@ -176,8 +176,11 @@ baygaud.o: baygaud.c /usr/include/stdc-predef.h \
  ../../src/lib/baygaud.multinest.h ../../src/lib/baygaud.trfit.h \
  ../../src/lib/baygaud.gsl.h ../../src/lib/baygaud.sort.h \
  ../../src/lib/baygaud.global_params.h ../../src/lib/baygaud.etc.h \
- ../../src/lib/baygaud.gfit.h ../../src/lib/baygaud.memory.h \
- ../../src/lib/baygaud.mpi.h /usr/include/x86_64-linux-gnu/sys/stat.h \
+ ../../src/lib/baygaud.gfit.h /usr/include/pthread.h /usr/include/sched.h \
+ /usr/include/x86_64-linux-gnu/bits/sched.h \
+ /usr/include/x86_64-linux-gnu/bits/setjmp.h \
+ ../../src/lib/baygaud.memory.h ../../src/lib/baygaud.mpi.h \
+ /usr/include/x86_64-linux-gnu/sys/stat.h \
  /usr/include/x86_64-linux-gnu/bits/stat.h /usr/include/unistd.h \
  /usr/include/x86_64-linux-gnu/bits/posix_opt.h \
  /usr/include/x86_64-linux-gnu/bits/environments.h \
@@ -605,6 +608,14 @@ baygaud.o: baygaud.c /usr/include/stdc-predef.h \
 ../../src/lib/baygaud.etc.h:
 
 ../../src/lib/baygaud.gfit.h:
+
+/usr/include/pthread.h:
+
+/usr/include/sched.h:
+
+/usr/include/x86_64-linux-gnu/bits/sched.h:
+
+/usr/include/x86_64-linux-gnu/bits/setjmp.h:
 
 ../../src/lib/baygaud.memory.h:
 

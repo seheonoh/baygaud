@@ -212,6 +212,18 @@ typedef struct {
 } _gfit_params;
 
 
+typedef struct {
+	int process_X0;
+	int process_X1;
+	int process_Y0;
+	int process_Y1;
+	int status; // 0: problem 1: ok
+	int rank;
+	double multinest_time_limit; // time limit for each multinest run
+} ThreadArgs;
+
+
+
 /* global parameters: 2D velocity field array */
 /*
 typedef struct {
@@ -298,6 +310,11 @@ extern struct rGalaxyPlane_pixel_TR_nonlinearEquation_params *p;
 // MPI datatype: see baygaud.mpi_datatype.h
 extern MPI_Datatype type[324];
 extern int blocklen[324]; 
+
+//extern int pWrap[128]; // multinest var : thread version : check Gfit_multinest_student_thread()
+
+// thread struct-type params
+//extern ThreadArgs *thread_args;
 
 // --- End of line
 

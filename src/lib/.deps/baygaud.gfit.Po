@@ -166,7 +166,9 @@ baygaud.gfit.o: baygaud.gfit.c /usr/include/stdc-predef.h baygaud.gfit.h \
  /usr/local/include/gsl/gsl_integration.h /usr/include/string.h \
  /usr/include/xlocale.h /usr/include/x86_64-linux-gnu/bits/string.h \
  /usr/include/x86_64-linux-gnu/bits/string2.h \
- /usr/include/x86_64-linux-gnu/bits/string3.h \
+ /usr/include/x86_64-linux-gnu/bits/string3.h /usr/include/pthread.h \
+ /usr/include/sched.h /usr/include/x86_64-linux-gnu/bits/sched.h \
+ /usr/include/x86_64-linux-gnu/bits/setjmp.h \
  /usr/lib/x86_64-linux-gnu/openmpi/include/mpi.h \
  /usr/lib/x86_64-linux-gnu/openmpi/include/mpi_portable_platform.h \
  baygaud.cfitsio.h /mnt/g0/research/packages/cfitsio/cfitsio/fitsio.h \
@@ -574,6 +576,14 @@ baygaud.gfit.h:
 /usr/include/x86_64-linux-gnu/bits/string2.h:
 
 /usr/include/x86_64-linux-gnu/bits/string3.h:
+
+/usr/include/pthread.h:
+
+/usr/include/sched.h:
+
+/usr/include/x86_64-linux-gnu/bits/sched.h:
+
+/usr/include/x86_64-linux-gnu/bits/setjmp.h:
 
 /usr/lib/x86_64-linux-gnu/openmpi/include/mpi.h:
 

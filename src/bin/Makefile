@@ -276,7 +276,7 @@ AM_CFLAGS = -O3 -DMPI -fopenmp -m64 -g -I$(top_srcdir)/src/lib -I$(DIR_CFITSIO) 
 baygaud_SOURCES = baygaud.c
 
 # the additional libraries needed to link baygaud
-baygaud_LDADD = -L$(top_srcdir)/src/lib -lbaygaud -L$(DIR_MPIOFF_MULTINEST) -lnest3_mpioff -L$(DIR_CFITSIO) -lcfitsio -L$(DIR_GSL) -lgsl -lpthread -lm
+baygaud_LDADD = -L$(top_srcdir)/src/lib -lbaygaud -L$(DIR_MPIOFF_MULTINEST) -lnest3_mpioff -L$(DIR_CFITSIO) -lcfitsio -L$(DIR_GSL) -lgsl -lpthread -lm -lpthread
 all: all-am
 
 .SUFFIXES:

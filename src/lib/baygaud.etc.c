@@ -87,36 +87,42 @@ void read_user_input_baygaud(TR_ringParameters *TRparam, multinest_paramters *mu
 void usage_baygaud()
 {
     printf("\n+ -------------------------------------------------------------------------------------- +\n");
-    printf("+ Bayesian Automated GAussian Decomposer (BAGAUD)                                        +\n");
+    printf("+ Bayesian Automated GAussian Decomposer (BAGAD)                                         +\n");
     printf("+ by SE-HEON OH (KASI/ICRAR) + WALLABY KINEMATICS WORKING GROUP                          +\n");
     printf("+ -------------------------------------------------------------------------------------- +\n");
     printf("+                                                                                        +\n");
     printf("+ Development history                                                                    +\n");
+    printf("+ : V.1.1.0 24/Mar/2018 (threaded version)                                               +\n");
     printf("+ : V.1.0.0 28/Feb/2018                                                                  +\n");
     printf("+                                                                                        +\n");
     printf("+ ! USAGE ------------------------------------------------------------------------------ +\n");
     printf("+                                                                                        +\n");
     printf("+: mpirun -np [0. N-threads= 8] ./baygaud                                                +\n");
 	printf("+         [working-dir] [input-cube.fits] [input-ref-vf.fits]                            +\n");
-	printf("+         [N-Gauss] [xlower] [ylower] [xupper] [yupper] [output_index(e.g., 0 ~ xxx)]    +\n");
+	printf("+         [N-Gauss] [xlower] [ylower] [xupper] [yupper] [output_dir]                     +\n");
+	printf("+         [output_index(e.g., 0 ~ xxx)]                                                  +\n");
     printf("+                                                                                        +\n");
     printf("+ A. INPUT data ------------------------------------------------------------------------ +\n");
     printf("+  [1. WORKING DIRECTORY= /home/baygaud/wdir]                                            +\n");
-	printf("+    : where the [input-cube.fits] and [input-ref-vf.fits] locate                        +\n");
+	printf("+    : where the [input-cube.fits] and [input-ref-vf.fits] locates                       +\n");
     printf("+  [2. INPUT DATA CUBE= input-cube.fits]                                                 +\n");
     printf("+  [3. INPUT 2D REFERENCE VELOITY FIELD= input-ref-vf.fits in (km/s)]                    +\n");
     printf("+  ..................................................................................... +\n");
     printf("+ B. The maximum number of Gaussian components to be decomposed ------------------------ +\n");
     printf("+  [4. N-Gauss= 4]                                                                       +\n");
     printf("+  ..................................................................................... +\n");
-    printf("+ C. AREA to decompose ----------------------------------------------------------------- +\n");
+    printf("+ C. AREA to extract ------------------------------------------------------------------- +\n");
     printf("+  [5. xlower= 0 in pixel]                                                               +\n");
     printf("+  [6. ylower= 0 in pixel]                                                               +\n");
     printf("+  [7. xupper= nax1 in pixel]                                                            +\n");
     printf("+  [8. yupper= nax2 in pixel]                                                            +\n");
     printf("+  ..................................................................................... +\n");
     printf("+ D. OUTPUT directory index ------------------------------------------------------------ +\n");
-    printf("+  [9. output_index= 0 or any number whatever you want]                                  +\n");
+    printf("+  [9. output_dir]                                                                       +\n");
+    printf("+  [10. output_index= 0 or whatever any number]                                          +\n");
+    printf("+  ..................................................................................... +\n");
+    printf("+ E. MAX TIME limit for each multinest run --------------------------------------------- +\n");
+    printf("+  [11. multinest_time_limit= 600 SEC for each multinset run]                            +\n");
     printf("+  ------------------------------------------------------------------------------------- +\n");
     printf("+                                                                                        +\n");
     printf("+ ! EXAMPLE ---------------------------------------------------------------------------- +\n");
@@ -127,7 +133,7 @@ void usage_baygaud()
     printf("+ input-ref-vf.fits \\                                                                    +\n");
     printf("+ 4 \\                                                                                    +\n");
     printf("+ 100 100 140 140 \\                                                                      +\n");
-    printf("+ 0                                                                                      +\n");
+    printf("+ _sub1 0 600                                                                            +\n");
     printf("+                                                                                        +\n");
     printf("+ -------------------------------------------------------------------------------------- +\n\n");
 }

@@ -13,5 +13,6 @@
 #include "baygaud.gfit.h"
 #include "baygaud.cfitsio.h"
 #include "baygaud.mpi_datatype.h"
+#include <pthread.h>
 
 #endif

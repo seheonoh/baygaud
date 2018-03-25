@@ -172,8 +172,10 @@ baygaud.2dmaps.o: baygaud.2dmaps.c /usr/include/stdc-predef.h \
  baygaud.cfitsio.h /mnt/g0/research/packages/cfitsio/cfitsio/fitsio.h \
  /mnt/g0/research/packages/cfitsio/cfitsio/longnam.h baygaud.multinest.h \
  baygaud.trfit.h baygaud.gsl.h baygaud.sort.h baygaud.global_params.h \
- baygaud.etc.h baygaud.gfit.h baygaud.memory.h baygaud.mpi.h \
- /usr/include/x86_64-linux-gnu/sys/stat.h \
+ baygaud.etc.h baygaud.gfit.h /usr/include/pthread.h /usr/include/sched.h \
+ /usr/include/x86_64-linux-gnu/bits/sched.h \
+ /usr/include/x86_64-linux-gnu/bits/setjmp.h baygaud.memory.h \
+ baygaud.mpi.h /usr/include/x86_64-linux-gnu/sys/stat.h \
  /usr/include/x86_64-linux-gnu/bits/stat.h /usr/include/unistd.h \
  /usr/include/x86_64-linux-gnu/bits/posix_opt.h \
  /usr/include/x86_64-linux-gnu/bits/environments.h \
@@ -598,6 +600,14 @@ baygaud.global_params.h:
 baygaud.etc.h:
 
 baygaud.gfit.h:
+
+/usr/include/pthread.h:
+
+/usr/include/sched.h:
+
+/usr/include/x86_64-linux-gnu/bits/sched.h:
+
+/usr/include/x86_64-linux-gnu/bits/setjmp.h:
 
 baygaud.memory.h:
 

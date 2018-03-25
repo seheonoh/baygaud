@@ -3,6 +3,7 @@
 # by SE-HEON OH (KASI/ICRAR) + WALLABY KINEMATICS WORKING GROUP                          +
 # -------------------------------------------------------------------------------------- +
 # baygaud README by Se-Heon Oh
+# version 1.1.0 (24 Mar 2018; thread version)
 # version 1.0.0 (28 Feb 2018)
 
 # DEPENDENCIES ==============
@@ -99,36 +100,42 @@ Please proceed with the following steps. The current version of BAYGAUD has been
 ==============
 
 + -------------------------------------------------------------------------------------- +
-+ Bayesian Automated GAussian Decomposer (BAGAUD)                                        +
++ Bayesian Automated GAussian Decomposer (BAGAD)                                         +
 + by SE-HEON OH (KASI/ICRAR) + WALLABY KINEMATICS WORKING GROUP                          +
 + -------------------------------------------------------------------------------------- +
 +                                                                                        +
 + Development history                                                                    +
++ : V.1.1.0 24/Mar/2018 (threaded version)                                               +
 + : V.1.0.0 28/Feb/2018                                                                  +
 +                                                                                        +
 + ! USAGE ------------------------------------------------------------------------------ +
 +                                                                                        +
 +: mpirun -np [0. N-threads= 8] ./baygaud                                                +
 +         [working-dir] [input-cube.fits] [input-ref-vf.fits]                            +
-+         [N-Gauss] [xlower] [ylower] [xupper] [yupper] [output_index(e.g., 0 ~ xxx)]    +
++         [N-Gauss] [xlower] [ylower] [xupper] [yupper] [output_dir]                     +
++         [output_index(e.g., 0 ~ xxx)]                                                  +
 +                                                                                        +
 + A. INPUT data ------------------------------------------------------------------------ +
 +  [1. WORKING DIRECTORY= /home/baygaud/wdir]                                            +
-+    : where the [input-cube.fits] and [input-ref-vf.fits] locate                        +
++    : where the [input-cube.fits] and [input-ref-vf.fits] locates                       +
 +  [2. INPUT DATA CUBE= input-cube.fits]                                                 +
 +  [3. INPUT 2D REFERENCE VELOITY FIELD= input-ref-vf.fits in (km/s)]                    +
 +  ..................................................................................... +
 + B. The maximum number of Gaussian components to be decomposed ------------------------ +
 +  [4. N-Gauss= 4]                                                                       +
 +  ..................................................................................... +
-+ C. AREA to decompose ----------------------------------------------------------------- +
++ C. AREA to extract ------------------------------------------------------------------- +
 +  [5. xlower= 0 in pixel]                                                               +
 +  [6. ylower= 0 in pixel]                                                               +
 +  [7. xupper= nax1 in pixel]                                                            +
 +  [8. yupper= nax2 in pixel]                                                            +
 +  ..................................................................................... +
 + D. OUTPUT directory index ------------------------------------------------------------ +
-+  [9. output_index= 0 or any number whatever you want]                                  +
++  [9. output_dir]                                                                       +
++  [10. output_index= 0 or whatever any number]                                          +
++  ..................................................................................... +
++ E. MAX TIME limit for each multinest run --------------------------------------------- +
++  [11. multinest_time_limit= 600 SEC for each multinest run]                            +
 +  ------------------------------------------------------------------------------------- +
 +                                                                                        +
 + ! EXAMPLE ---------------------------------------------------------------------------- +
@@ -139,10 +146,9 @@ Please proceed with the following steps. The current version of BAYGAUD has been
 + input-ref-vf.fits \                                                                    +
 + 4 \                                                                                    +
 + 100 100 140 140 \                                                                      +
-+ 0                                                                                      +
++ _sub1 0 600                                                                            +
 +                                                                                        +
 + -------------------------------------------------------------------------------------- +
-
 
 # git update
 #==============

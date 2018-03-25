@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 
 #include <mpi.h>
 
@@ -52,6 +53,7 @@
 // Gfit multinest 1D fit
 void Gfit_multinest(multinest_paramters *multinest_param, TR_ringParameters *TRparam);
 void Gfit_multinest_student(multinest_paramters *multinest_param, TR_ringParameters *TRparam);
+void *Gfit_multinest_student_thread(void *thread_args);
 void loglikelihood_gfit(double *Cube, int *ndim, int *npars, double *lnew, TR_ringParameters *TRparam);
 void loglikelihood_gfit_student(double *Cube, int *ndim, int *npars, double *lnew, TR_ringParameters *TRparam);
 void dumper_Gfits(int *nSamples, int *nlive, int *nPar, double **physLive, double **posterior, double **paramConstr, double *maxLogLike, double *logZ, double *INSlogZ, double *logZerr, TR_ringParameters *TRparam);
@@ -60,8 +62,11 @@ double gauss_function(double *Cube, int n_gauss, double x);
 double gauss_function_at_a_pixel_gfit_params_mpi(float *****gfit_params, int n_gauss, int _i_, int _j_, double x);
 double each_gauss_function_at_a_pixel_gfit_params_mpi(float *****gfit_params, int n_gauss, int nth_gauss, int _i_, int _j_, double x);
 
-void ext_bulk_motions(int xlower, int xupper, int ylower, int yupper, multinest_paramters *multinest_param, TR_ringParameters *TRparam, int sorting_order, float ***HI_cube_mpi, int rank);
+void ext_bulk_motions(int xlower, int xupper, int ylower, int yupper, multinest_paramters *multinest_param, TR_ringParameters *TRparam, int sorting_order, float ***HI_cube_mpi, int rank, void *thread_args);
+void *ext_bulk_motions_thread(void *thread_args);
 int cmp(const void *vp, const void *vq);
+int check_thread_status(int pnWorkStatus, int nWaitTime, int rank);
+void cleanup(void *arg);
 
 // --- End of line
 

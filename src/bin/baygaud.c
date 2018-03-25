@@ -1,11 +1,13 @@
-
 #include "baygaud.main.h"
+
+# define N_PROCESS_MAX 128
+# define MAX_TIME_LIMIT 1E6 // SEC
 
 // --- Main program --- //
 int main(int argc, char *argv[])
 {
 
-	if(argc != 10) // 1:wdir 2:cube.fits (m/s) 3:ref.vf.fits (km/s) 4:xlower 5:ylower 6:xupper 7:yupper
+	if(argc != 12) // 1:wdir 2:cube.fits (m/s) 3:ref.vf.fits (km/s) 4:xlower 5:ylower 6:xupper 7:yupper
 	{
 		usage_baygaud();
 		exit(0);
@@ -19,34 +21,39 @@ int main(int argc, char *argv[])
     int nkeys, nkeys_2d_refvf;
     char card[FLEN_CARD];
 	char dirname[1000];
-	struct stat st={0};
-
-    // Dimensions   
-    int i=0, j=0, i0=0, j0=0, k=0, n=0;
-	int _ng=0, _ng1=0, _ng2=0, opt_gauss_number=0;
-    int status=0;
     int anynul=0;
-    int rank;
-	int output_index;
-
-    FILE *file_exist, *ftemp;
-    fitsfile *fptr1, *fptr2, *fptr_2d_refvf;
-    float *fits_pointer;
-    clock_t start_time = clock();
-
-    // ETC params
-	int mi, mj;
-
-    // MPI variables
-    int n_node;
-	int tag1=1, tag2=2;
+	struct stat st={0};
 
 	// FITS DATA
 	int xlower, ylower, xupper, yupper;
 	int sorting_order=1;
 	int fits_read_key_status=0;
+    FILE *file_exist, *ftemp;
+    fitsfile *fptr1, *fptr2, *fptr_2d_refvf;
+    float *fits_pointer;
 
+    // Dimensions   
+    int i=0, j=0, i0=0, j0=0, k=0, n=0;
+	int _ng=0, _ng1=0, _ng2=0, opt_gauss_number=0;
+
+
+	// THREADS
+    int status=0;
+	int thread_status;
+	int thr_id;
+	pthread_t p_thread[N_PROCESS_MAX];
+	int output_index;
+
+    clock_t start_time = clock();
+
+    // ETC params
+	int mi, mj;
+
+	// MPI
     int size;
+    int n_node;
+	int tag1=1, tag2=2;
+    int rank;
 
     int n_block;
 	int block_length_subcube, stride_subcube;
@@ -56,8 +63,8 @@ int main(int argc, char *argv[])
 	int block_length_subvf, stride_vf;
 	int n_elements, n_stride, x_offset, y_offset;
 
-    int process_X[128][2]; // process_X[0][0]: xlower, process_X[0][1]: xupper
-    int process_Y[128][2]; // process_Y[0][0]: ylower, process_Y[0][1]: yupper
+    int process_X[N_PROCESS_MAX][2]; // process_X[0][0]: xlower, process_X[0][1]: xupper
+    int process_Y[N_PROCESS_MAX][2]; // process_Y[0][0]: ylower, process_Y[0][1]: yupper
 
 	double hist_mean_filterbox, hist_std_filterbox;
 	float vel_min, vel_max, gauss_model, vel_norm, vel;
@@ -67,8 +74,9 @@ int main(int argc, char *argv[])
 	double channel_resolution = 0; // in m/s : TBD
 	double vesc_limit = 1E9; // in m/s : TBD
 	double vel_bulk_limit = 1E9; // in m/s : TBD
-	int gauss_number_primary=0, gauss_number_lowest=0, gauss_number_cold=0, gauss_number_warm=0, gauss_number_strong_nonc=0, gauss_number_weak_nonc=0, gauss_number_hvc;
+	int gauss_number_primary=0, gauss_number_lowest=0, gauss_number_cold=0, gauss_number_warm=0, gauss_number_strong_nonc=0, gauss_number_weak_nonc=0, gauss_number_hvc=0;
 
+	double multinest_time_limit=0;
 
     MPI_Status mpistatus;
     MPI_Request request[10];
@@ -124,7 +132,6 @@ int main(int argc, char *argv[])
     TRparam_mpi = allocate_mpi_dataset(TRparam, type, blocklen);    
     MPI_Type_commit(&TRparam_mpi);
 
-	float a;
 
 	if(rank==0)
 	{
@@ -213,12 +220,11 @@ nlx2(2) |__|__|  x nax3(5)
 		//ylower = 0;
 		//yupper = TRparam[0].nax2;
 
-		xlower = atoi(argv[5]);
-		ylower = atoi(argv[6]);
-		xupper = atoi(argv[7]);
-		yupper = atoi(argv[8]);
-
-		output_index = atoi(argv[9]);
+	xlower = atoi(argv[5]);
+	ylower = atoi(argv[6]);
+	xupper = atoi(argv[7]);
+	yupper = atoi(argv[8]);
+	output_index = atoi(argv[10]);
 
 	double *_filterbox;
 	int box_x=xupper-xlower, box_y=yupper-ylower;
@@ -291,7 +297,6 @@ nlx2(2) |__|__|  x nax3(5)
 		// +++ A. READ INPUT VF KEYWORDS ++W.+
 		// --------------------------------------------------------------------------------------------- //
 
-
 		// read 3d cube
 		read_3dcube(TRparam, fname, card);
 		// read input ref VF
@@ -313,7 +318,59 @@ nlx2(2) |__|__|  x nax3(5)
 		  //MPI_Send(&model_VF_mpi[i0][j0], 1, sub_VF, n+1, 111, MPI_COMM_WORLD);
 		  //MPI_Send(&perfect_sGfit_mpi[i0][j0][0], 1, sub_cube_gaufit, n+1, 222, MPI_COMM_WORLD);
 		}
-		ext_bulk_motions(process_X[rank][0], process_X[rank][1], process_Y[rank][0], process_Y[rank][1], multinest_param, TRparam, sorting_order, raw_cube_mpi[0].data, rank);
+
+/*
+
+		int thread_status_master=0; // should be declared
+		int _t=0;
+		ThreadArgs *thread_args;
+		thread_args = (ThreadArgs *)malloc(sizeof(ThreadArgs));
+		thread_args->process_X0 = process_X[rank][0];
+		thread_args->process_X1 = process_X[rank][1];
+		thread_args->process_Y0 = process_Y[rank][0];
+		thread_args->process_Y1 = process_Y[rank][1];
+		thread_args->status = 0; // not finished
+		thread_args->rank = rank; // rank
+		thread_args->multinest_time_limit = multinest_time_limit; // sec
+
+		thr_id = pthread_create(&p_thread[rank], NULL, ext_bulk_motions_thread, (void *)thread_args);
+		thread_args->status = 1; // not finished
+
+		// +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		// +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		// +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		// YOU HAVE TO 
+		//pthread_detach(p_thread[rank]);
+		// +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		// +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		// +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+		while(1)
+		{
+			_t++;
+			sleep(1);
+			if(thread_args->status == 1)
+			{
+				pthread_join(p_thread[rank], (void **)&thread_status_master);
+				break;
+			}
+
+			if(_t > MAX_TIME_LIMIT)
+			{
+				printf("foced to exit\n");
+				pthread_cleanup_push(cleanup, "thread first handler");
+				pthread_cleanup_pop(0);
+				pthread_exit((void *)2);
+				break;
+			}
+		}
+*/
+
+		ThreadArgs *thread_args;
+		thread_args = (ThreadArgs *)malloc(sizeof(ThreadArgs));
+		thread_args->multinest_time_limit = atof(argv[11]);; // sec : time limit for each multinest run
+
+		ext_bulk_motions(process_X[rank][0], process_X[rank][1], process_Y[rank][0], process_Y[rank][1], multinest_param, TRparam, sorting_order, raw_cube_mpi[0].data, rank, thread_args);
 
 		/*++++++++++++++++++++++++++++++++++++++++++*/
 		// receive gfit_results from sub-nodes
@@ -321,14 +378,12 @@ nlx2(2) |__|__|  x nax3(5)
 		{
 			i0 = process_X[n+1][0];
 			j0 = process_Y[n+1][0];
-
 			MPI_Recv(&gfit_params_mpi[0].data[i0][j0][0][0][0], 1, sub_gfit_params, n+1, 222, MPI_COMM_WORLD, &mpistatus);
 		}
 		for(n=0; n<n_node-1; n++)
 		{
 			i0 = process_X[n+1][0];
 			j0 = process_Y[n+1][0];
-
 			MPI_Recv(&gfit_params_e_mpi[0].data[i0][j0][0][0][0], 1, sub_gfit_params, n+1, 333, MPI_COMM_WORLD, &mpistatus);
 		}
 
@@ -345,9 +400,47 @@ nlx2(2) |__|__|  x nax3(5)
 		MPI_Irecv(&(HI_VF[0].data[0][0]), TRparam[0].nax1*TRparam[0].nax2, MPI_FLOAT, 0, 112, MPI_COMM_WORLD, &recv_req[rank]);
         MPI_Wait(&recv_req[rank], &mpistatus);
 
-		// do analysis
-		ext_bulk_motions(process_X[rank][0], process_X[rank][1], process_Y[rank][0], process_Y[rank][1], multinest_param, TRparam, sorting_order, raw_cube_mpi[0].data, rank);
+/*
+		// creat threads for individual ranks
+		int thread_status_slave=1; // should be declared
+		int _t=0;
+		ThreadArgs *thread_args;
+		thread_args = (ThreadArgs *)malloc(sizeof(ThreadArgs));
+		thread_args->process_X0 = process_X[rank][0];
+		thread_args->process_X1 = process_X[rank][1];
+		thread_args->process_Y0 = process_Y[rank][0];
+		thread_args->process_Y1 = process_Y[rank][1];
+		thread_args->status = 0; // not finished
+		thread_args->rank = rank; // rank
+		thread_args->multinest_time_limit = multinest_time_limit; // sec
 
+		thr_id = pthread_create(&p_thread[rank], NULL, ext_bulk_motions_thread, (void *)thread_args);
+
+		while(1)
+		{
+			_t++;
+			sleep(1);
+			if(thread_args->status == 1)
+			{
+				pthread_join(p_thread[rank], (void **)&thread_status_slave);
+				break;
+			}
+
+			if(_t > MAX_TIME_LIMIT)
+			{
+				printf("foced to exit\n");
+				pthread_cleanup_push(cleanup, "thread first handler");
+				pthread_cleanup_pop(0);
+				pthread_exit((void *)2);
+				break;
+			}
+		}
+*/
+
+		ThreadArgs *thread_args;
+		thread_args = (ThreadArgs *)malloc(sizeof(ThreadArgs));
+		thread_args->multinest_time_limit = atof(argv[11]);; // sec : time limit for each multinest run
+		ext_bulk_motions(process_X[rank][0], process_X[rank][1], process_Y[rank][0], process_Y[rank][1], multinest_param, TRparam, sorting_order, raw_cube_mpi[0].data, rank, thread_args);
 
 		MPI_Isend(&gfit_params_mpi[0].data[i0][j0][0][0][0], 1, sub_gfit_params, 0, 222, MPI_COMM_WORLD, &send_req[rank]);
 		MPI_Isend(&gfit_params_e_mpi[0].data[i0][j0][0][0][0], 1, sub_gfit_params, 0, 333, MPI_COMM_WORLD, &send_req[rank]);
@@ -819,7 +912,6 @@ nlx2(2) |__|__|  x nax3(5)
 							if(!isinf(BVF[6].data[j+mj][i+mi]) && !isnan(BVF[6].data[j+mj][i+mi]) && BVF[6].data[j+mj][i+mi] != 0) // if no blank
 							{
 								_filterbox[bn] = BVF[6].data[j+mj][i+mi];
-//if(i==29 && j==51) printf("%d %d %d %e %e %e\n", bn, i+mi, j+mj, _filterbox[bn]);
 								bn++;
 							}
 						}
@@ -848,76 +940,84 @@ nlx2(2) |__|__|  x nax3(5)
 		}
 
 
-//printf("xxxx: %f %f\n", gfit_params_mpi[0].data[48][61][(int)gfit_params_mpi[0].data[48][61][0][0][5]-1][0][6], BVF[6].data[61][48]);
-
 		// make directories if not exist
-		sprintf(dirname, "%s/output%d",TRparam[0].wdir, output_index);
-    	if(stat(dirname, &st) != 0)
+		sprintf(dirname, "%s/%s", argv[1], argv[9]);
+		if(stat(dirname, &st) != 0)
 		{
-        	mkdir(dirname, 0775);
+		    mkdir(dirname, 0775);
 		}
+
+		sprintf(dirname, "%s/%s/output%d", argv[1], argv[9], output_index);
+		if(stat(dirname, &st) != 0)
+		{
+		    mkdir(dirname, 0775);
+		}
+
+		sprintf(dirname, "%s/%s/output%d", argv[1], argv[9], output_index);
+
 		for(_ng=0; _ng<TRparam[0].n_gauss; _ng++)
 		{
-			for(i=0; i<10; i++)
+		    for(i=0; i<10; i++)
+		    {
+			sprintf(dirname, "%s/%s/output%d/G%02dg%02d", argv[1], argv[9], output_index, TRparam[0].n_gauss, _ng+1);
+			if(stat(dirname, &st) != 0)
 			{
-				sprintf(dirname, "%s/output%d/G%02dg%02d", argv[1], output_index, TRparam[0].n_gauss, _ng+1);
-    			if(stat(dirname, &st) != 0)
-				{
-        			mkdir(dirname, 0775);
-				}
+			    mkdir(dirname, 0775);
 			}
+		    }
 		}
 
+
 		// 1. bulk directory
-		sprintf(dirname, "%s/output%d/bulk", argv[1], output_index);
+		sprintf(dirname, "%s/%s/output%d/bulk", argv[1], argv[9], output_index);
     	if(stat(dirname, &st) != 0)
 		{
         	mkdir(dirname, 0775);
 		}
 		// 2. psgfit directory
-		sprintf(dirname, "%s/output%d/ps_gfit", argv[1], output_index);
+		sprintf(dirname, "%s/%s/output%d/ps_gfit", argv[1], argv[9], output_index);
     	if(stat(dirname, &st) != 0)
 		{
         	mkdir(dirname, 0775);
 		}
 		// 3. sgfit directory
-		sprintf(dirname, "%s/output%d/single_gfit", argv[1], output_index);
+		sprintf(dirname, "%s/%s/output%d/single_gfit", argv[1], argv[9], output_index);
     	if(stat(dirname, &st) != 0)
 		{
         	mkdir(dirname, 0775);
 		}
 		// 4. primary_gfit directory
-		sprintf(dirname, "%s/output%d/primary_gfit", argv[1], output_index);
+		sprintf(dirname, "%s/%s/output%d/primary_gfit", argv[1], argv[9], output_index);
     	if(stat(dirname, &st) != 0)
 		{
         	mkdir(dirname, 0775);
 		}
 		// 5. cold gfit directory
-		sprintf(dirname, "%s/output%d/cold_gfit", argv[1], output_index);
+		sprintf(dirname, "%s/%s/output%d/cold_gfit", argv[1], argv[9], output_index);
     	if(stat(dirname, &st) != 0)
 		{
         	mkdir(dirname, 0775);
 		}
 		// 6. warm gfit directory
-		sprintf(dirname, "%s/output%d/warm_gfit", argv[1], output_index);
+		sprintf(dirname, "%s/%s/output%d/warm_gfit", argv[1], argv[9], output_index);
     	if(stat(dirname, &st) != 0)
 		{
         	mkdir(dirname, 0775);
 		}
 		// 7. strong nonc. gfit directory
-		sprintf(dirname, "%s/output%d/snonc_gfit", argv[1], output_index);
+		sprintf(dirname, "%s/%s/output%d/snonc_gfit", argv[1], argv[9], output_index);
     	if(stat(dirname, &st) != 0)
 		{
         	mkdir(dirname, 0775);
 		}
 		// 8. weak nonc. gfit directory
-		sprintf(dirname, "%s/output%d/wnonc_gfit", argv[1], output_index);
+		sprintf(dirname, "%s/%s/output%d/wnonc_gfit", argv[1], argv[9], output_index);
     	if(stat(dirname, &st) != 0)
 		{
         	mkdir(dirname, 0775);
 		}
 		// 9. HVC gfit directory
-		sprintf(dirname, "%s/output%d/hvc_gfit", argv[1], output_index);
+		sprintf(dirname, "%s/%s/output%d/hvc_gfit", argv[1], argv[9], output_index);
     	if(stat(dirname, &st) != 0)
 		{
         	mkdir(dirname, 0775);
@@ -928,90 +1028,90 @@ nlx2(2) |__|__|  x nax3(5)
 		// 1. bulk
 		for(i=0; i<10; i++)
 		{
-			sprintf(&fname[0].fitsfile_bvf[_ng][i], "%s/output%d/bulk/%s.bulk.%d.fits", argv[1], output_index, argv[2], i);
+			sprintf(&fname[0].fitsfile_bvf[_ng][i], "%s/%s/output%d/bulk/%s.bulk.%d.fits", argv[1], argv[9], output_index, argv[2], i);
 			save_2dmapsfits(fptr_2d_refvf, fname[0].fitsfile_trfit_model, &fname[0].fitsfile_bvf[_ng][i], TRparam[0].nax1, TRparam[0].nax2, &BVF_analysis[10*0+i]);
 
-			sprintf(&fname[0].fitsfile_bvf_e[_ng][i], "%s/output%d/bulk/%s.bulk.%d.e.fits", argv[1], output_index, argv[2], i);
+			sprintf(&fname[0].fitsfile_bvf_e[_ng][i], "%s/%s/output%d/bulk/%s.bulk.%d.e.fits", argv[1], argv[9], output_index, argv[2], i);
 			save_2dmapsfits(fptr_2d_refvf, fname[0].fitsfile_trfit_model, &fname[0].fitsfile_bvf_e[_ng][i], TRparam[0].nax1, TRparam[0].nax2, &BVF_analysis_e[10*0+i]);
 		}
 
 		// 2. psgfit directory
 		for(i=0; i<10; i++)
 		{
-			sprintf(&fname[0].fitsfile_bvf[_ng][i], "%s/output%d/ps_gfit/%s.ps_gfit.%d.fits", argv[1], output_index, argv[2], i);
+			sprintf(&fname[0].fitsfile_bvf[_ng][i], "%s/%s/output%d/ps_gfit/%s.ps_gfit.%d.fits", argv[1], argv[9], output_index, argv[2], i);
 			save_2dmapsfits(fptr_2d_refvf, fname[0].fitsfile_trfit_model, &fname[0].fitsfile_bvf[_ng][i], TRparam[0].nax1, TRparam[0].nax2, &BVF_analysis[10*1+i]);
 
-			sprintf(&fname[0].fitsfile_bvf_e[_ng][i], "%s/output%d/ps_gfit/%s.ps_gfit.%d.e.fits", argv[1], output_index, argv[2], i);
+			sprintf(&fname[0].fitsfile_bvf_e[_ng][i], "%s/%s/output%d/ps_gfit/%s.ps_gfit.%d.e.fits", argv[1], argv[9], output_index, argv[2], i);
 			save_2dmapsfits(fptr_2d_refvf, fname[0].fitsfile_trfit_model, &fname[0].fitsfile_bvf_e[_ng][i], TRparam[0].nax1, TRparam[0].nax2, &BVF_analysis_e[10*1+i]);
 		}
 
 		// 3. sgfit directory
 		for(i=0; i<10; i++)
 		{
-			sprintf(&fname[0].fitsfile_bvf[_ng][i], "%s/output%d/single_gfit/%s.single_gfit.%d.fits", argv[1], output_index, argv[2], i);
+			sprintf(&fname[0].fitsfile_bvf[_ng][i], "%s/%s/output%d/single_gfit/%s.single_gfit.%d.fits", argv[1], argv[9], output_index, argv[2], i);
 			save_2dmapsfits(fptr_2d_refvf, fname[0].fitsfile_trfit_model, &fname[0].fitsfile_bvf[_ng][i], TRparam[0].nax1, TRparam[0].nax2, &BVF_analysis[10*2+i]);
 
-			sprintf(&fname[0].fitsfile_bvf_e[_ng][i], "%s/output%d/single_gfit/%s.single_gfit.%d.e.fits", argv[1], output_index, argv[2], i);
+			sprintf(&fname[0].fitsfile_bvf_e[_ng][i], "%s/%s/output%d/single_gfit/%s.single_gfit.%d.e.fits", argv[1], argv[9], output_index, argv[2], i);
 			save_2dmapsfits(fptr_2d_refvf, fname[0].fitsfile_trfit_model, &fname[0].fitsfile_bvf_e[_ng][i], TRparam[0].nax1, TRparam[0].nax2, &BVF_analysis_e[10*2+i]);
 		}
 
 		// 4. primary_gfit directory
 		for(i=0; i<10; i++)
 		{
-			sprintf(&fname[0].fitsfile_bvf[_ng][i], "%s/output%d/primary_gfit/%s.primary_gfit.%d.fits", argv[1], output_index, argv[2], i);
+			sprintf(&fname[0].fitsfile_bvf[_ng][i], "%s/%s/output%d/primary_gfit/%s.primary_gfit.%d.fits", argv[1], argv[9], output_index, argv[2], i);
 			save_2dmapsfits(fptr_2d_refvf, fname[0].fitsfile_trfit_model, &fname[0].fitsfile_bvf[_ng][i], TRparam[0].nax1, TRparam[0].nax2, &BVF_analysis[10*3+i]);
 
-			sprintf(&fname[0].fitsfile_bvf_e[_ng][i], "%s/output%d/primary_gfit/%s.primary_gfit.%d.e.fits", argv[1], output_index, argv[2], i);
+			sprintf(&fname[0].fitsfile_bvf_e[_ng][i], "%s/%s/output%d/primary_gfit/%s.primary_gfit.%d.e.fits", argv[1], argv[9], output_index, argv[2], i);
 			save_2dmapsfits(fptr_2d_refvf, fname[0].fitsfile_trfit_model, &fname[0].fitsfile_bvf_e[_ng][i], TRparam[0].nax1, TRparam[0].nax2, &BVF_analysis_e[10*3+i]);
 		}
 
 		// 5. cold gfit directory
 		for(i=0; i<10; i++)
 		{
-			sprintf(&fname[0].fitsfile_bvf[_ng][i], "%s/output%d/cold_gfit/%s.cold_gfit.%d.fits", argv[1], output_index, argv[2], i);
+			sprintf(&fname[0].fitsfile_bvf[_ng][i], "%s/%s/output%d/cold_gfit/%s.cold_gfit.%d.fits", argv[1], argv[9], output_index, argv[2], i);
 			save_2dmapsfits(fptr_2d_refvf, fname[0].fitsfile_trfit_model, &fname[0].fitsfile_bvf[_ng][i], TRparam[0].nax1, TRparam[0].nax2, &BVF_analysis[10*4+i]);
 
-			sprintf(&fname[0].fitsfile_bvf_e[_ng][i], "%s/output%d/cold_gfit/%s.cold_gfit.%d.e.fits", argv[1], output_index, argv[2], i);
+			sprintf(&fname[0].fitsfile_bvf_e[_ng][i], "%s/%s/output%d/cold_gfit/%s.cold_gfit.%d.e.fits", argv[1], argv[9], output_index, argv[2], i);
 			save_2dmapsfits(fptr_2d_refvf, fname[0].fitsfile_trfit_model, &fname[0].fitsfile_bvf_e[_ng][i], TRparam[0].nax1, TRparam[0].nax2, &BVF_analysis_e[10*4+i]);
 		}
 
 		// 6. warm gfit directory
 		for(i=0; i<10; i++)
 		{
-			sprintf(&fname[0].fitsfile_bvf[_ng][i], "%s/output%d/warm_gfit/%s.warm_gfit.%d.fits", argv[1], output_index, argv[2], i);
+			sprintf(&fname[0].fitsfile_bvf[_ng][i], "%s/%s/output%d/warm_gfit/%s.warm_gfit.%d.fits", argv[1], argv[9], output_index, argv[2], i);
 			save_2dmapsfits(fptr_2d_refvf, fname[0].fitsfile_trfit_model, &fname[0].fitsfile_bvf[_ng][i], TRparam[0].nax1, TRparam[0].nax2, &BVF_analysis[10*5+i]);
 
-			sprintf(&fname[0].fitsfile_bvf_e[_ng][i], "%s/output%d/warm_gfit/%s.warm_gfit.%d.e.fits", argv[1], output_index, argv[2], i);
+			sprintf(&fname[0].fitsfile_bvf_e[_ng][i], "%s/%s/output%d/warm_gfit/%s.warm_gfit.%d.e.fits", argv[1], argv[9], output_index, argv[2], i);
 			save_2dmapsfits(fptr_2d_refvf, fname[0].fitsfile_trfit_model, &fname[0].fitsfile_bvf_e[_ng][i], TRparam[0].nax1, TRparam[0].nax2, &BVF_analysis_e[10*5+i]);
 		}
 
 		// 7. strong nonc. gfit directory
 		for(i=0; i<10; i++)
 		{
-			sprintf(&fname[0].fitsfile_bvf[_ng][i], "%s/output%d/snonc_gfit/%s.snonc_gfit.%d.fits", argv[1], output_index, argv[2], i);
+			sprintf(&fname[0].fitsfile_bvf[_ng][i], "%s/%s/output%d/snonc_gfit/%s.snonc_gfit.%d.fits", argv[1], argv[9], output_index, argv[2], i);
 			save_2dmapsfits(fptr_2d_refvf, fname[0].fitsfile_trfit_model, &fname[0].fitsfile_bvf[_ng][i], TRparam[0].nax1, TRparam[0].nax2, &BVF_analysis[10*6+i]);
 
-			sprintf(&fname[0].fitsfile_bvf_e[_ng][i], "%s/output%d/snonc_gfit/%s.snonc_gfit.%d.e.fits", argv[1], output_index, argv[2], i);
+			sprintf(&fname[0].fitsfile_bvf_e[_ng][i], "%s/%s/output%d/snonc_gfit/%s.snonc_gfit.%d.e.fits", argv[1], argv[9], output_index, argv[2], i);
 			save_2dmapsfits(fptr_2d_refvf, fname[0].fitsfile_trfit_model, &fname[0].fitsfile_bvf_e[_ng][i], TRparam[0].nax1, TRparam[0].nax2, &BVF_analysis_e[10*6+i]);
 		}
 
 		// 8. weak nonc. gfit directory
 		for(i=0; i<10; i++)
 		{
-			sprintf(&fname[0].fitsfile_bvf[_ng][i], "%s/output%d/wnonc_gfit/%s.wnonc_gfit.%d.fits", argv[1], output_index, argv[2], i);
+			sprintf(&fname[0].fitsfile_bvf[_ng][i], "%s/%s/output%d/wnonc_gfit/%s.wnonc_gfit.%d.fits", argv[1], argv[9], output_index, argv[2], i);
 			save_2dmapsfits(fptr_2d_refvf, fname[0].fitsfile_trfit_model, &fname[0].fitsfile_bvf[_ng][i], TRparam[0].nax1, TRparam[0].nax2, &BVF_analysis[10*7+i]);
 
-			sprintf(&fname[0].fitsfile_bvf_e[_ng][i], "%s/output%d/wnonc_gfit/%s.wnonc_gfit.%d.e.fits", argv[1], output_index, argv[2], i);
+			sprintf(&fname[0].fitsfile_bvf_e[_ng][i], "%s/%s/output%d/wnonc_gfit/%s.wnonc_gfit.%d.e.fits", argv[1], argv[9], output_index, argv[2], i);
 			save_2dmapsfits(fptr_2d_refvf, fname[0].fitsfile_trfit_model, &fname[0].fitsfile_bvf_e[_ng][i], TRparam[0].nax1, TRparam[0].nax2, &BVF_analysis_e[10*7+i]);
 		}
 
 		// 9. HVC gfit directory
 		for(i=0; i<10; i++)
 		{
-			sprintf(&fname[0].fitsfile_bvf[_ng][i], "%s/output%d/hvc_gfit/%s.hvc_gfit.%d.fits", argv[1], output_index, argv[2], i);
+			sprintf(&fname[0].fitsfile_bvf[_ng][i], "%s/%s/output%d/hvc_gfit/%s.hvc_gfit.%d.fits", argv[1], argv[9], output_index, argv[2], i);
 			save_2dmapsfits(fptr_2d_refvf, fname[0].fitsfile_trfit_model, &fname[0].fitsfile_bvf[_ng][i], TRparam[0].nax1, TRparam[0].nax2, &BVF_analysis[10*8+i]);
 
-			sprintf(&fname[0].fitsfile_bvf_e[_ng][i], "%s/output%d/hvc_gfit/%s.hvc_gfit.%d.e.fits", argv[1], output_index, argv[2], i);
+			sprintf(&fname[0].fitsfile_bvf_e[_ng][i], "%s/%s/output%d/hvc_gfit/%s.hvc_gfit.%d.e.fits", argv[1], argv[9], output_index, argv[2], i);
 			save_2dmapsfits(fptr_2d_refvf, fname[0].fitsfile_trfit_model, &fname[0].fitsfile_bvf_e[_ng][i], TRparam[0].nax1, TRparam[0].nax2, &BVF_analysis_e[10*8+i]);
 		}
 
@@ -1021,10 +1121,10 @@ nlx2(2) |__|__|  x nax3(5)
 		{
 			for(i=0; i<10; i++)
 			{
-				sprintf(&fname[0].fitsfile_bvf[_ng][i], "%s/output%d/G%02dg%02d/%s.bvf.g%d.%d.fits", argv[1], output_index, TRparam[0].n_gauss, _ng+1, argv[2], _ng, i);
+				sprintf(&fname[0].fitsfile_bvf[_ng][i], "%s/%s/output%d/G%02dg%02d/%s.bvf.g%d.%d.fits", argv[1], argv[9], output_index, TRparam[0].n_gauss, _ng+1, argv[2], _ng, i);
 				save_2dmapsfits(fptr_2d_refvf, fname[0].fitsfile_trfit_model, &fname[0].fitsfile_bvf[_ng][i], TRparam[0].nax1, TRparam[0].nax2, &BVF[_ng*10 + i]);
 
-				sprintf(&fname[0].fitsfile_bvf_e[_ng][i], "%s/output%d/G%02dg%02d/%s.bvf.g%d.%d.e.fits", argv[1], output_index, TRparam[0].n_gauss, _ng+1, argv[2], _ng, i);
+				sprintf(&fname[0].fitsfile_bvf_e[_ng][i], "%s/%s/output%d/G%02dg%02d/%s.bvf.g%d.%d.e.fits", argv[1], argv[9], output_index, TRparam[0].n_gauss, _ng+1, argv[2], _ng, i);
 				save_2dmapsfits(fptr_2d_refvf, fname[0].fitsfile_trfit_model, &fname[0].fitsfile_bvf_e[_ng][i], TRparam[0].nax1, TRparam[0].nax2, &BVF_e[_ng*10 + i]);
 			}
 		}

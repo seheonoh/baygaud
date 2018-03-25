@@ -26,6 +26,6 @@ bin_PROGRAMS= baygaud
 baygaud_SOURCES= baygaud.c
 
 # the additional libraries needed to link baygaud
-baygaud_LDADD= -L$(top_srcdir)/src/lib -lbaygaud -L$(DIR_MPIOFF_MULTINEST) -lnest3_mpioff -L$(DIR_CFITSIO) -lcfitsio -L$(DIR_GSL) -lgsl -lpthread -lm
+baygaud_LDADD= -L$(top_srcdir)/src/lib -lbaygaud -L$(DIR_MPIOFF_MULTINEST) -lnest3_mpioff -L$(DIR_CFITSIO) -lcfitsio -L$(DIR_GSL) -lgsl -lpthread -lm -lpthread
 
 # end of line

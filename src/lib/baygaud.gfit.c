@@ -96,6 +96,61 @@ void Gfit_multinest_student(multinest_paramters *multinest_param, TR_ringParamet
     run_mpioff(is, mmodal, ceff, nlive, tol, efr, ndims, nPar, nClsPar, maxModes, updInt, Ztol, root, seed, pWrap, fb, resume, outfile, initMPI, logZero, maxiter, loglikelihood_gfit_student, dumper_Gfits_student, TRparam);
 }
 
+// +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+//void Gfit_multinest_student(multinest_paramters *multinest_param, TR_ringParameters *TRparam)
+void *Gfit_multinest_student_thread(void *thread_args)
+{
+    /* set the MultiNest sampling parameters */
+    char root[500];     // root for output files
+    int i=0;
+	int rank;
+
+    int is, mmodal, ceff, nlive, ndims, nPar, nClsPar, updInt, maxModes, seed, fb, resume, outfile, initMPI, maxiter;
+    double efr, tol, Ztol, logZero;
+
+	ThreadArgs *my_thread_args = (ThreadArgs *)thread_args;
+	rank = my_thread_args->rank;
+
+    /* set the MultiNest sampling parameters */
+    is = multinest_param[0].is;
+    mmodal = multinest_param[0].mmodal;
+    ceff = multinest_param[0].ceff;
+    nlive = multinest_param[0].nlive;
+    efr = multinest_param[0].efr;
+    tol = multinest_param[0].tol;
+    updInt = multinest_param[0].updInt;
+
+    Ztol = multinest_param[0].Ztol;
+    maxModes = multinest_param[0].maxModes;
+    strcpy(root, "gfit.");
+
+    seed = multinest_param[0].seed;
+    fb = multinest_param[0].fb;
+    resume = multinest_param[0].resume;
+    //outfile = multinest_param[0].outfile;
+    outfile = 0; // for avoiding name output name confliction between different ranks
+    initMPI = multinest_param[0].initMPI;
+    logZero = multinest_param[0].logZero;
+    maxiter = multinest_param[0].maxiter;
+
+    ndims = 3*TRparam[0].n_gauss+1+1; // +1 for e_sigma_fitted...
+    nPar = 3*TRparam[0].n_gauss+1+1; // +1 for e_sigma_fitted...
+    nClsPar = 3*TRparam[0].n_gauss+1+1; // +1 for e_sigma_fitted...
+
+    int pWrap[ndims];
+	//int *pWrap = (int*)malloc(sizeof(int) * ndims);
+
+    for(i=0; i<ndims; i++)
+    {
+        pWrap[i] = multinest_param[0].pWrap[i];
+    }
+
+    /* Calling multinest */
+    run_mpioff(is, mmodal, ceff, nlive, tol, efr, ndims, nPar, nClsPar, maxModes, updInt, Ztol, root, seed, pWrap, fb, resume, outfile, initMPI, logZero, maxiter, loglikelihood_gfit_student, dumper_Gfits_student, TRparam);
+
+	my_thread_args->status = 1; // finished normally : will be checked in the master process
+}
+
 
 // +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 void loglikelihood_gfit(double *Cube, int *ndim, int *npars, double *lnew, TR_ringParameters *TRparam)
@@ -490,7 +545,7 @@ double each_gauss_function_at_a_pixel_gfit_params_mpi(float *****gfit_params, in
 
 
 // +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-void ext_bulk_motions(int xlower, int xupper, int ylower, int yupper, multinest_paramters *multinest_param, TR_ringParameters *TRparam, int sorting_order, float ***HI_cube_mpi, int rank)
+void ext_bulk_motions(int xlower, int xupper, int ylower, int yupper, multinest_paramters *multinest_param, TR_ringParameters *TRparam, int sorting_order, float ***HI_cube_mpi, int rank, void *thread_args)
 {
 	int i=0, j=0, k=0, n=0, i_max, j_max, b0=0;
 	int i_std=0;
@@ -501,6 +556,8 @@ void ext_bulk_motions(int xlower, int xupper, int ylower, int yupper, multinest_
 	int n_gauss_upto=0, n_gauss_upto_t=0;
 	int _n0=0, _n1=0, _n2=0, _n3=0, _p=0;
 	int _i_, _j_;
+	int exit_loop = 0;
+	double multinest_time_limit;
 
 	nax1 = TRparam[0].nax1;
 	nax2 = TRparam[0].nax2;
@@ -511,6 +568,10 @@ void ext_bulk_motions(int xlower, int xupper, int ylower, int yupper, multinest_
 	double gauss_model, gauss_model0, gauss_model1, gauss_model2;
 	double unit_channel_width=0, N_vel_data;
 	double single_gauss_model;
+	pthread_t p_thread_gfit;
+	ThreadArgs *my_thread_args = (ThreadArgs *)thread_args;
+	int thr_id;
+	multinest_time_limit = my_thread_args->multinest_time_limit;
 
 	/* set ring parameters */
 	double maxLogLike_sGfit, n_freeParams_sGfit, maxLogLike_dGfit, n_freeParams_dGfit;
@@ -592,6 +653,7 @@ void ext_bulk_motions(int xlower, int xupper, int ylower, int yupper, multinest_
 	{
 		for(j=ylower; j<yupper; j++)
 		{
+			printf("x:%5d y:%5d being processed...\n", i, j);
 			n_processed_profiles += 1;
 			TRparam[0]._i_ = i; // pixel xcoord i
 			TRparam[0]._j_ = j; // pixel ycoord j
@@ -660,7 +722,625 @@ void ext_bulk_motions(int xlower, int xupper, int ylower, int yupper, multinest_
 
 				// start multinest
 				multinest_param[0].nlive = 80;
-				multinest_param[0].maxiter = 100000;
+				multinest_param[0].maxiter = 0;
+				multinest_param[0].tol = 0.3;
+				multinest_param[0].efr = 0.8;
+
+				// set effective channels
+				//TRparam[0].effective_channel_start = (int)(TRparam[0].gX1/TRparam[0].unit_channel_width);
+				//TRparam[0].effective_channel_end = (int)(TRparam[0].gX2/TRparam[0].unit_channel_width);
+				TRparam[0].effective_channel_start = 0;
+				TRparam[0].effective_channel_end = 1*nax3;
+				N_vel_data = (double)(TRparam[0].effective_channel_end - TRparam[0].effective_channel_start);
+
+					
+				// ++++++++++++++++++++++++++++++++++++++++++++++++++++
+				// gfit_params_mpi description
+
+				// gfit_params_mpi[i][j]  [gauss-#:0, 1, 2...][gauss-sequence-#:0, 1, 2...][param-#:0(bg), 1(A), 2(sig), 3(X), 4(BIC), 5(optimal gaussn-#] 6(std), 7(s/n of each gaussian components)], 8[s/n of the HIGEST FLUX] 9[s/n of the LOWEST gaussian component]: note the HIGHEST FLUX means not the fitteted Gaussian component with the highest flux but the total peak flux
+
+				// gfit_params_mpi[i][j]  [gauss-#:0, 1, 2...][gauss-sequence-#:0, 1, 2...][param-#:0(bg), 1(A), 2(sig), 3(X), 4(BIC), 5(perfect single Gauss] 6(std), 7(s/n)], 8[optimal Gauss-#] 9[s/n same as in 7?]
+				// gfit_params_e_mpi[i][j][gauss-#:0, 1, 2...][gauss-sequence-#:0, 1, 2...][param-#:0(bg_e), 1(A_e), 2(sig_e), 3(X_e), 4(none), 5(none), 6(none), 7(none)]
+				// gfit_params_mpi[i][j][0][0][5] = optimal gauss-# based on BIC
+				// note gauss-# starts from 0: e.g., if the optimal gauss-# found is 3, then gfit_params_mpi[i][j][3-1][0][0], ....
+				// ++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+				
+
+				for(i_std=0; i_std<1; i_std++)
+				{
+					//if(i_std==0)
+					//{
+						//for(k=0; k<1*nax3; k++) // start with initial error values...
+						//{
+						//	TRparam[0].velocity_profile_e[k] = 1E-2; // default uncertainties for single gauss fit
+						//}
+					//}
+
+					// initialize
+					for(k=0; k<n_gauss_upto_t; k++)
+					{
+					   gfit_bic_temp[k][0] = 0;
+					   gfit_bic_temp[k][1] = 1E9; // put a large value
+					}
+
+					for(_n0=1; _n0<n_gauss_upto+1; _n0++)
+					{
+						TRparam[0].n_gauss = _n0;
+						my_thread_args->status = 0;
+						thr_id = pthread_create(&p_thread_gfit, NULL, Gfit_multinest_student_thread, (void *)my_thread_args);
+						if (thr_id != 0)
+						{
+								printf("can't create thread: %s\n", strerror(thr_id));
+								exit(1);
+						}
+
+						double _t=0;
+						int thread_status=0;
+						while(1)
+						{
+								_t += 1;
+								sleep(1);
+								if(my_thread_args->status == 1)
+								{
+										//printf("exit normally\n");
+										break;
+								}
+
+								if(_t > multinest_time_limit)
+								{
+										printf("x:%d y:%d - %d Gaussians (%.0f sec elapsed) -> FORCED TO EXIT\n", i, j, TRparam[0].n_gauss, _t);
+										//pthread_cleanup_push(cleanup, "thread first handler");
+										//pthread_cleanup_push(cleanup, NULL);
+										//pthread_cleanup_pop(0);
+										//pthread_exit((void *)2);
+										break;
+								}
+						}
+						pthread_join(p_thread_gfit, (void **)&thread_status);
+						//Gfit_multinest_student(multinest_param, TRparam); // normal multinest without the thread option
+
+
+						for(_n1=0; _n1<_n0; _n1++)
+						{
+							gfit_params_mpi[0].data[i][j][_n0-1][_n1][0] = TRparam[0].g_param[0]; // background first
+							gfit_params_e_mpi[0].data[i][j][_n0-1][_n1][0] = TRparam[0].g_param[3*_n0+1]; // background error firstk
+
+							for(_n2=1; _n2<4; _n2++)
+							{
+								gfit_params_mpi[0].data[i][j][_n0-1][_n1][_n2] = TRparam[0].g_param[3*_n1+_n2];
+								//printf("%d %f\n", _n2, gfit_params_mpi[0].data[i][j][_n0-1][_n1][_n2]);
+							}
+							for(_n2=1; _n2<4; _n2++)
+							{
+								gfit_params_e_mpi[0].data[i][j][_n0-1][_n1][_n2] = TRparam[0].g_param[3*(_n0+_n1)+_n2+1];
+							//	printf("%d %f\n", _n2, gfit_params_e_mpi[0].data[i][j][_n0-1][_n1][_n2]);
+							}
+						}
+
+						// 1.1. calculate and save BIC
+						gfit_BIC = -2.0*TRparam[0].maxLogLikeF + (3*_n0+1)*log(N_vel_data);
+						if(gfit_BIC > 1E5) gfit_BIC = 1E3; // C integer overflow...
+						//gfit_BIC = -2.0*TRparam[0].maxLogLikeF + (3*_n0+1)*(log(N_vel_data)-log(2*M_PI));
+						//gfit_BIC = -2.0*TRparam[0].maxLogLikeF + 2*(3*_n0+1);
+						gfit_params_mpi[0].data[i][j][_n0-1][0][4] = gfit_BIC; // save it to the array for the first Gaussian fit, distinguished by the number of Gaussians 
+						//printf("ngauss:%d bic:%f\n", TRparam[0].n_gauss, gfit_params_mpi[0].data[i][j][_n0-1][0][4]);
+
+
+						gfit_bic_temp[_n0-1][0] = (double)_n0; // # of gaussian functions fitted
+						gfit_bic_temp[_n0-1][1] = gfit_BIC*1E3; // BIC : multiplied by 1E3 for using int comparison function
+
+						// ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						// derive std of the single gaussian fit to decide whether to go multiple gaussian fit..
+						// if s/n is less than 3 then do only single gaussian fit 
+						if(_n0 == 1)
+						{
+							// ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+							// derive std of residuals of the single gaussian fit: if s/n is less than 2 then the rest of the gaussian fits with the larger numnber of gaussians is not proceeded...
+							vel_min = (0 - TRparam[0].velocity_offset)*TRparam[0].Velocity_Seperation + TRparam[0].Reference_Velocity;
+							vel_max = (1*nax3-1 - TRparam[0].velocity_offset)*TRparam[0].Velocity_Seperation + TRparam[0].Reference_Velocity;
+							if(vel_min > vel_max)
+							{
+								vel_temp = vel_min;
+								vel_min = vel_max;
+								vel_max = vel_temp;
+							}
+
+							// set the limits for computing the std based on a single Gaussian fit : this is for being used below
+							// Xo is [0-1] in normalised values.
+							Xo_lower_std = gfit_params_mpi[0].data[i][j][0][0][3] - 3*gfit_params_mpi[0].data[i][j][0][0][2];
+							Xo_upper_std = gfit_params_mpi[0].data[i][j][0][0][3] + 3*gfit_params_mpi[0].data[i][j][0][0][2];
+
+							// update std using the data in the outer regions..
+							std = 0;
+							std_n = 0;
+							for(k=0; k<1*nax3; k++) // residuals for the original vel. section
+							{
+								vel = (k - TRparam[0].velocity_offset)*TRparam[0].Velocity_Seperation + TRparam[0].Reference_Velocity;
+								vel_norm = (vel-vel_min)/(vel_max-vel_min); // normalise velocity to make it easier to fit
+
+								//if(TRparam[0].Velocity_Seperation < 0) vel_norm = 1 - vel_norm;
+								//gauss_model = gauss_function_at_a_pixel(TRparam[0].g_param, TRparam[0].n_gauss, _i_, _j_, vel_norm); // calculate a model value for a given polynomial function
+								if((vel_norm < Xo_lower_std || vel_norm > Xo_upper_std))
+								{
+									std_n++;
+									gauss_model = gauss_function_at_a_pixel_gfit_params_mpi(gfit_params_mpi[0].data, 1, i, j, vel_norm);
+
+									velocity_profile_temp[std_n] = TRparam[0].velocity_profile_norm[k] - gauss_model;
+								}
+							}
+							//std = sqrt(std / (std_n-1)); // standard deviation of residuals
+
+							if(std_n < 3)
+							{
+								std = 0.1; // default value
+							}
+							else
+							{
+								robust_mean_std(velocity_profile_temp, std_n, &res_mean, &res_std);
+								std = res_std;
+							}
+
+							// computing s/n
+							_Xo = gfit_params_mpi[0].data[i][j][0][0][3];
+							sn_profile = (each_gauss_function_at_a_pixel_gfit_params_mpi(gfit_params_mpi[0].data, 1, 0, i, j, _Xo) - gfit_params_mpi[0].data[i][j][0][0][0]) / std;
+							gfit_params_mpi[0].data[i][j][0][0][7] = sn_profile;
+
+							// put the std value
+							gfit_params_mpi[0].data[i][j][0][0][6] = std;
+							// +++++++++++++++++++++++++++++++++++++
+							//if(sn_profile < 0.5)
+							//{
+							//	_n0 = n_gauss_upto + 2; // no more gaussian fit... exit loop
+							//	n_gauss_upto_t = 1; // for sorting below
+							//	gfit_params_mpi[0].data[i][j][0][0][4] = gfit_bic_temp[0][0];
+							//	gfit_params_mpi[0].data[i][j][0][0][5] = 1; // single gaussian 
+							//}
+						}
+					}
+
+
+					// save the optimal gauss-# based on BIC
+					if(_n0 != (n_gauss_upto + 2))
+					{
+						qsort(gfit_bic_temp, n_gauss_upto_t, sizeof(gfit_bic_temp[0]), array2D_comp);
+						gfit_params_mpi[0].data[i][j][0][0][5] = gfit_bic_temp[0][0];
+						//gfit_params_mpi[0].data[i][j][0][0][5] = 4;
+					}
+
+					// ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+					// derive std of residuals;
+					vel_min = (0 - TRparam[0].velocity_offset)*TRparam[0].Velocity_Seperation + TRparam[0].Reference_Velocity;
+					vel_max = (1*nax3-1 - TRparam[0].velocity_offset)*TRparam[0].Velocity_Seperation + TRparam[0].Reference_Velocity;
+					if(vel_min > vel_max)
+					{
+						vel_temp = vel_min;
+						vel_min = vel_max;
+						vel_max = vel_temp;
+					}
+
+					std = 0;
+					std_n = 0;
+					for(k=0; k<1*nax3; k++) // residuals for the original vel. section
+					{
+						vel = (k - TRparam[0].velocity_offset)*TRparam[0].Velocity_Seperation + TRparam[0].Reference_Velocity;
+						vel_norm = (vel-vel_min)/(vel_max-vel_min); // normalise velocity to make it easier to fit
+						if((vel_norm < Xo_lower_std || vel_norm > Xo_upper_std))
+						{
+							std_n++;
+							gauss_model = gauss_function_at_a_pixel_gfit_params_mpi(gfit_params_mpi[0].data, (int)gfit_params_mpi[0].data[i][j][0][0][5], i, j, vel_norm);
+							velocity_profile_temp[std_n] = TRparam[0].velocity_profile_norm[k] - gauss_model;
+						}
+
+					}
+					robust_mean_std(velocity_profile_temp, std_n, &res_mean, &res_std);
+					std = res_std;
+
+					if(std < 1E-4) // too small rms : this is for model cubes..  in unit 
+					{
+						std = 0;
+						std_n = 0;
+						for(k=0; k<1*nax3; k++) // residuals for the original vel. section
+						{
+							vel = (k - TRparam[0].velocity_offset)*TRparam[0].Velocity_Seperation + TRparam[0].Reference_Velocity;
+							vel_norm = (vel-vel_min)/(vel_max-vel_min); // normalise velocity to make it easier to fit
+							//if(TRparam[0].Velocity_Seperation < 0) vel_norm = 1 - vel_norm;
+							//gauss_model = gauss_function_at_a_pixel(TRparam[0].g_param, TRparam[0].n_gauss, _i_, _j_, vel_norm); // calculate a model value for a given polynomial function
+							if((k < (0+0.3*nax3) || k > (1*nax3-0.3*nax3))) // +- 10% of the edge regions..
+							{
+								std_n++;
+								gauss_model = gauss_function_at_a_pixel_gfit_params_mpi(gfit_params_mpi[0].data, (int)gfit_params_mpi[0].data[i][j][0][0][5], i, j, vel_norm);
+
+								velocity_profile_temp[std_n] = TRparam[0].velocity_profile_norm[k] - gauss_model;
+							}
+						}
+						//std = sqrt(std / (std_n-1)); // standard deviation of residuals
+
+						robust_mean_std(velocity_profile_temp, std_n, &res_mean, &res_std);
+						std = res_std;
+					}
+
+					//for(k=0; k<nax3; k++) // update profile error with the std of the residuals between the observed and best derived gaussian fit results from the first fit
+					//{
+					//	TRparam[0].velocity_profile_e[i] = std;
+						//printf("%d %d %f \n",i, j, std);
+					//}
+					// ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+					// computing s/n for the profile whose amp is the lowest/highest among the deomposed the gaussian components..
+					// +++++++++++++++++++++++++++++++++++++
+					//_Xo = gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][0][3];
+					for(_n3=0; _n3<(int)gfit_params_mpi[0].data[i][j][0][0][5]; _n3++)
+					{
+						gfit_A_temp[_n3][0] = gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][3]; // Xo of _n3-gauss 
+						//gfit_A_temp[_n3][1] = 1E5*gauss_function_at_a_pixel_gfit_params_mpi(gfit_params_mpi[0].data, (int)gfit_params_mpi[0].data[i][j][0][0][5], i, j, gfit_A_temp[_n3][0]); // A at Xo : multiplied by 1E5 for using compare (int comparison function as it can't compare double values)
+						gfit_A_temp[_n3][1] = 1E5*each_gauss_function_at_a_pixel_gfit_params_mpi(gfit_params_mpi[0].data, (int)gfit_params_mpi[0].data[i][j][0][0][5], _n3, i, j, gfit_A_temp[_n3][0]); // A at Xo : multiplied by 1E5 for using compare (int comparison function as it can't compare double values)
+					}
+					// sort gfit_A_temp to find the biggest A value which is used for computing s/n
+					qsort(gfit_A_temp, (int)gfit_params_mpi[0].data[i][j][0][0][5], sizeof(gfit_A_temp[0]), array2D_comp);
+					// the lowest flux [9]
+					sn_profile = (gfit_A_temp[0][1]/1E5 - gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][0][0]) / std;
+					gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][0][9] = sn_profile; // S/N of the profile with the LOWEST flux
+
+					// the highest flux [8] : into the first G???1 component!
+					sn_profile = (gfit_A_temp[(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][1]/1E5 - gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][0][0]) / std;
+					gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][0][8] = sn_profile; // S/N of the profile with the HIGHEST flux
+
+					// put optimal # of gaussians [5] : into the first G???1 component!
+					gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][0][5] = gfit_params_mpi[0].data[i][j][0][0][5];
+
+					// put the std value [6] : converted to the original units : into the first G???1 component!
+					gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][0][6] = std*(amp_profile_max-amp_profile_min);
+
+					// s/n of each gaussian : see below : [7]
+					// +++++++++++++++++++++++++++++++++++++
+
+					// computing s/n for each gaussian components : into all the G???? components
+					// +++++++++++++++++++++++++++++++++++++
+					for(_n3=0; _n3<(int)gfit_params_mpi[0].data[i][j][0][0][5]; _n3++)
+					{
+						_Xo = gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][3];
+						sn_profile = (each_gauss_function_at_a_pixel_gfit_params_mpi(gfit_params_mpi[0].data, (int)gfit_params_mpi[0].data[i][j][0][0][5], _n3, i, j, _Xo) - gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][0][0]) / std;
+						gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][7] = sn_profile;
+					}
+					// +++++++++++++++++++++++++++++++++++++
+				}
+
+				TRparam[0].n_gauss = n_gauss_upto; // recovered to the original one 
+				n_gauss_upto_t = n_gauss_upto; // recovered to the input one
+
+				// re-scaled peak flux at Xo : a which is converted to the Gaussian A below by multiplying sqrt(2*pi)*sigma where sigma is also converted to the original units: see below
+				// here a is the peak flux of the each gaussian components in the original units conveted..	
+				// below a is converted to the A : area under the each Gaussian comps. which can be converted to the integrated intensity map: moment 0
+				//for(_n3=0; _n3<(int)gfit_params_mpi[0].data[i][j][0][0][5]; _n3++)
+				//{
+				//	_Xo = gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][3];
+				//	gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][1] = each_gauss_function_at_a_pixel_gfit_params_mpi(gfit_params_mpi[0].data, (int)gfit_params_mpi[0].data[i][j][0][0][5], _n3, i, j, _Xo) * (amp_profile_max - amp_profile_min) + amp_profile_min;
+				//	gfit_params_e_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][1] = gfit_params_e_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][1] * (amp_profile_max - amp_profile_min);
+//printf("%d %d %//f %f %f\n", i, j, gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][1], gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][2], gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][3]);
+				//}
+
+				// +++++++++++++++++++++++++
+				// recover the normalised units into the original ones... !!! this is for optimally decomposed gaussians found from Gfit_multinest!!!
+				for(_n3=0; _n3<(int)gfit_params_mpi[0].data[i][j][0][0][5]; _n3++)
+				{
+					// background : to original units
+					g0_norm = gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][0];
+					gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][0] = gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][0] * (amp_profile_max - amp_profile_min) + amp_profile_min; // background
+					gfit_params_e_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][0] = gfit_params_e_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][0] * (amp_profile_max - amp_profile_min); // background error
+
+					// sigma
+					s_norm = gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][2]; // save for the conversion of A below
+					gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][2] = gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][2] * (vel_max - vel_min);
+					gfit_params_e_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][2] = gfit_params_e_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][2] * (vel_max - vel_min);
+
+					// intensity (gaussian area = A parameter)
+					a_norm = gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][1];
+					gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][1] = ((a_norm/(sqrt(2*M_PI)*s_norm) + g0_norm) * (amp_profile_max - amp_profile_min) + amp_profile_min -gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][0]) * sqrt(2*M_PI)*gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][2];
+					//printf(" %d %d %f %f %f %f %f %d\n", i, j, amp_profile_max, amp_profile_min, gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][1], a_norm, (int)gfit_params_mpi[0].data[i][j][0][0][5]);
+					ae_norm = gfit_params_e_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][1];
+					gfit_params_e_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][1] = ((ae_norm/(sqrt(2*M_PI)*s_norm) + g0_norm) * (amp_profile_max - amp_profile_min) + amp_profile_min -gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][0]) * sqrt(2*M_PI)*gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][2];
+
+					//gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][1] = gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][1] * sqrt(2.0*M_PI) * gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][2];
+					//gfit_params_e_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][1] = gfit_params_e_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][1] * sqrt(2.0*M_PI) * gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][2];
+
+					// central velocity
+					gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][3] = gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][3] * (vel_max - vel_min) + vel_min;
+					gfit_params_e_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][3] = gfit_params_e_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][3] * (vel_max - vel_min);
+
+
+//printf("%d %d bg:%f a:%f s:%f v:%f %f\n", i, j, gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][0],
+//									gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][1],
+//									gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][2],
+//									gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][_n3][3], a_norm);
+				}
+				// put the std value [6]
+				//gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][0][6] = gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][0][6] * (amp_profile_max - amp_profile_min);
+				// +++++++++++++++++++++++++
+
+				// +++++++++++++++++++++++++
+				// recover the normalised units into the original ones... !!! this is for the single gaussian component from Gfit_multinest!!! gfit_params_mpi[0].data[i][j][0][0][0-9]
+				if((int)gfit_params_mpi[0].data[i][j][0][0][5] > 1) // if not done above.. : into the single component : sgfit...
+				{
+					// background : to original units
+					g0_norm = gfit_params_mpi[0].data[i][j][0][0][0];
+					gfit_params_mpi[0].data[i][j][0][0][0] = gfit_params_mpi[0].data[i][j][0][0][0] * (amp_profile_max - amp_profile_min) + amp_profile_min; // background
+					gfit_params_e_mpi[0].data[i][j][0][0][0] = gfit_params_e_mpi[0].data[i][j][0][0][0] * (amp_profile_max - amp_profile_min); // background error
+
+					// sigma
+					s_norm = gfit_params_mpi[0].data[i][j][0][0][2];
+					gfit_params_mpi[0].data[i][j][0][0][2] = gfit_params_mpi[0].data[i][j][0][0][2] * (vel_max - vel_min);
+					gfit_params_e_mpi[0].data[i][j][0][0][2] = gfit_params_e_mpi[0].data[i][j][0][0][2] * (vel_max - vel_min);
+
+					// intensity (gaussian area = A parameter) : A = a * sqrt(2pi) * sigma where sigma is in the original units
+				
+					a_norm = gfit_params_mpi[0].data[i][j][0][0][1];
+
+					gfit_params_mpi[0].data[i][j][0][0][1] = ((a_norm/(sqrt(2*M_PI)*s_norm) + g0_norm) * (amp_profile_max - amp_profile_min) + amp_profile_min -gfit_params_mpi[0].data[i][j][0][0][0]) * sqrt(2*M_PI)*gfit_params_mpi[0].data[i][j][0][0][2]; // jy * m/s
+
+
+					ae_norm = gfit_params_e_mpi[0].data[i][j][0][0][1];
+					//gfit_params_mpi[0].data[i][j][0][0][1] = gfit_params_mpi[0].data[i][j][0][0][1] * sqrt(2.0*M_PI) * gfit_params_mpi[0].data[i][j][0][0][2];
+					gfit_params_e_mpi[0].data[i][j][0][0][1] = ((ae_norm/(sqrt(2*M_PI)*s_norm) + g0_norm) * (amp_profile_max - amp_profile_min) + amp_profile_min -gfit_params_mpi[0].data[i][j][0][0][0]) * sqrt(2*M_PI)*gfit_params_mpi[0].data[i][j][0][0][2];
+
+					// central velocity
+					gfit_params_mpi[0].data[i][j][0][0][3] = gfit_params_mpi[0].data[i][j][0][0][3] * (vel_max - vel_min) + vel_min;
+					gfit_params_e_mpi[0].data[i][j][0][0][3] = gfit_params_e_mpi[0].data[i][j][0][0][3] * (vel_max - vel_min);
+
+					// rms
+					gfit_params_mpi[0].data[i][j][0][0][6] =  gfit_params_mpi[0].data[i][j][0][0][6] * (amp_profile_max - amp_profile_min);
+				}
+				// +++++++++++++++++++++++++
+
+				//printf("\n %d %d LOW:%f HIGH:%f %d std:%f %f %f\n", i, j, gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][0][9], gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][0][8], (int)gfit_params_mpi[0].data[i][j][0][0][5], gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][0][6], \
+gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][0][1]/(sqrt(2*M_PI)*gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][0][2]), \
+gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][1][1]/(sqrt(2*M_PI)*gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][1][2]));
+			}
+			else
+			{
+				// recover the normalised units into the original ones...
+				for(_n0=1; _n0<n_gauss_upto+1; _n0++)
+				{
+
+				//printf("after: amp_max:%f amp_min:%f\n", amp_profile_max, amp_profile_min);
+					for(_n1=0; _n1<_n0; _n1++)
+					{
+						gfit_params_mpi[0].data[i][j][_n0-1][_n1][0] = 1E90;
+						gfit_params_e_mpi[0].data[i][j][_n0-1][_n1][0] = 1E90;
+
+						for(_n2=1; _n2<4; _n2++)
+						{
+							if(_n2 == 1) // amplitude
+							{
+								//printf("xxxx %f %f %f %f\n", gfit_params_mpi[0].data[i][j][_n0-1][_n1][_n2], amp_profile_max, amp_profile_min, gfit_params_mpi[0].data[i][j][_n0-1][_n1][_n2] * (amp_profile_max - amp_profile_min) + amp_profile_min);
+								gfit_params_mpi[0].data[i][j][_n0-1][_n1][_n2] = 1E90;
+							}
+							else if(_n2 == 2)// sigma
+							{
+								gfit_params_mpi[0].data[i][j][_n0-1][_n1][_n2] = 1E90;
+								gfit_params_mpi[0].data[i][j][_n0-1][_n1][1] = 1E90;
+							}
+							else if(_n2 == 3)// velocity
+							{
+								gfit_params_mpi[0].data[i][j][_n0-1][_n1][_n2] = 1E90;
+							}
+						//	printf("%d %f\n", _n2, gfit_params_mpi[0].data[i][j][_n0-1][_n1][_n2]);
+						}
+						for(_n2=1; _n2<4; _n2++)
+						{
+							if(_n2 == 1) // amplitude error
+							{
+								gfit_params_e_mpi[0].data[i][j][_n0-1][_n1][_n2] = 1E90;
+							}
+							else if(_n2 == 2)// sigma
+							{
+								gfit_params_e_mpi[0].data[i][j][_n0-1][_n1][_n2] = 1E90;
+								gfit_params_e_mpi[0].data[i][j][_n0-1][_n1][1] = 1E90;
+							}
+							else if(_n2 == 3)// velocity
+							{
+								gfit_params_e_mpi[0].data[i][j][_n0-1][_n1][_n2] = 1E90;
+							}
+						//	printf("%d %f\n", _n2, gfit_params_e_mpi[0].data[i][j][_n0-1][_n1][_n2]);
+						}
+					}
+				}
+			}
+			//printf("\r rank-%2d : x[%4d] y[%4d] : %4.2f : (%10d/%10d)", rank, i, j, 100*n_processed_profiles/n_total_profiles, (int)n_processed_profiles, (int)n_total_profiles);
+			//fflush(stdout);
+
+			//j += TRparam[0].decimY-1; 
+			//if(j == nax2 || j > nax2)
+			//	j = nax2-2;
+		}
+		//i += TRparam[0].decimX-1; 
+		//if(i == nax1 || i > nax1)
+		//	i = nax1-2;
+	}
+
+	free(gfit_bic_temp[0]);
+	free(gfit_bic_temp);
+	free(gfit_A_temp[0]);
+	free(gfit_A_temp);
+}
+
+// +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+void *ext_bulk_motions_thread(void *thread_args)
+{
+	int i=0, j=0, k=0, n=0, i_max, j_max, b0=0;
+	int i_std=0;
+	int status=0, anynul=0, group=0;
+	int N_perfect_single_gaussian=0;
+	int calc_initial_sigma=0;
+	int nax1, nax2, nax3;
+	int n_gauss_upto=0, n_gauss_upto_t=0;
+	int _n0=0, _n1=0, _n2=0, _n3=0, _p=0;
+	int _i_, _j_;
+	int thr_id;
+
+	double multinest_time_limit;
+	pthread_t p_thread_gfit;
+	int xlower, xupper, ylower, yupper;
+
+	ThreadArgs *my_thread_args = (ThreadArgs *)thread_args;
+	xlower = my_thread_args->process_X0;
+	xupper = my_thread_args->process_X1;
+	ylower = my_thread_args->process_Y0;
+	yupper = my_thread_args->process_Y1;
+	multinest_time_limit = my_thread_args->multinest_time_limit;
+	my_thread_args->status = 0;
+
+	nax1 = TRparam[0].nax1;
+	nax2 = TRparam[0].nax2;
+	nax3 = TRparam[0].nax3;
+
+	double sGfit_flux, dGfit_flux;
+	double gauss_model, gauss_model0, gauss_model1, gauss_model2;
+	double unit_channel_width=0, N_vel_data;
+	double single_gauss_model;
+
+	/* set ring parameters */
+	double maxLogLike_sGfit, n_freeParams_sGfit, maxLogLike_dGfit, n_freeParams_dGfit;
+	double vel, vel_norm, vel_min, vel_max, amp_min, amp_max, vel_temp;
+	double gfit_BIC=0;
+	double BIC_sGfit=0., BIC_dGfit=0., ratio_sGfit_dGfit_BIC=0;
+	//double vel_profile_res[nax3];
+	//double *velocity_profile_temp = (double*)malloc(sizeof(double) * nax3); // 1D array: Nrings x 1
+	double velocity_profile_temp[3*nax3];
+	double vel_profile_res_RBM=0., vel_profile_res_SIGMA=0.;
+	double perfect_sGfit_amp=0., perfect_sGfit_sigma=0.;
+	double bg_left_edge_rbm=0, bg_left_edge_sigma=0;
+	double gauss1_flux, gauss2_flux;
+
+	// 1. the represenative profile
+	double max_profile_g01, max_profile_g02;
+	double max_profile_gA1, max_profile_gA2;
+	double max_profile_gS1, max_profile_gS2;
+	double max_profile_gX1, max_profile_gX2;
+
+	double peak_flux, peak_flux_t;
+
+	int std_n;
+	double std, sn_profile, _Xo;
+	double res_mean, res_std;
+	double n_total_profiles=0, n_processed_profiles=0;
+
+	double Xo_lower_std, Xo_upper_std;
+
+	double a_norm, s_norm, x_norm, g0_norm;
+	double ae_norm, se_norm, xe_norm, g0e_norm;
+	double amp_profile_min, amp_profile_max;
+
+    /* initialize dynamic 2D array */
+    double **gfit_bic_temp = (double**)malloc(sizeof(double *) * TRparam[0].n_gauss); // 2D array: TRparam[0].n_gauss x 2
+    for(i=0; i<TRparam[0].n_gauss; i++)
+    {
+       gfit_bic_temp[i] = (double*)malloc(sizeof(double) * 2);
+    }
+
+    /* initialize dynamic 2D array */
+    double **gfit_A_temp = (double**)malloc(sizeof(double *) * TRparam[0].n_gauss); // 2D array: TRparam[0].n_gauss x 2
+    for(i=0; i<TRparam[0].n_gauss; i++)
+    {
+       gfit_A_temp[i] = (double*)malloc(sizeof(double) * 2);
+    }
+
+	vel_min = (0 - TRparam[0].velocity_offset)*TRparam[0].Velocity_Seperation + TRparam[0].Reference_Velocity;
+	vel_max = (1*nax3-1 - TRparam[0].velocity_offset)*TRparam[0].Velocity_Seperation + TRparam[0].Reference_Velocity;
+	if(vel_min > vel_max)
+	{
+		vel_temp = vel_min;
+		vel_min = vel_max;
+		vel_max = vel_temp;
+	}
+
+	TRparam[0].unit_channel_width = 1.0/(double)(nax3*1);
+	// BULK LIMIT 
+	//bulk_limit = 0.2; // in normalised unit
+
+	// ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+	// I. Extract a velocity field which only has "perfect" single Gaussian velocity profile.
+	// : A strict BIC criteria based small errors in velocity profile is used,
+	// : i.e., TRparam[0].velocity_profile_e[i] = TRparam[0].vel_profile_res_SIGMA*0.2;
+
+	n_total_profiles = (xupper-xlower)*(yupper-ylower);
+	n_gauss_upto = TRparam[0].n_gauss;
+	n_gauss_upto_t = TRparam[0].n_gauss;
+
+	//printf("rank:%d xlower:%d xupper:%d ylower:%d yupper:%d\n", my_thread_args->rank, xlower, xupper, ylower, yupper);
+
+	for(i=xlower; i<xupper; i++) // in the given region : xlower compared to TRparam[0].xlower
+	{
+		for(j=ylower; j<yupper; j++)
+		{
+			n_processed_profiles += 1;
+			TRparam[0]._i_ = i; // pixel xcoord i
+			TRparam[0]._j_ = j; // pixel ycoord j
+			if(!isnan(raw_cube_mpi[0].data[i][j][0]) && !isinf(raw_cube_mpi[0].data[i][j][nax3-1]))
+			//if(HI_VF[j][i] + 1 > HI_VF[j][i]) // if the current pixel is not blank in mom1
+			{
+				for(k=0; k<nax3; k++)
+				{
+					if(raw_cube_mpi[0].data[i][j][k]+1 > raw_cube_mpi[0].data[i][j][k]) // not blank	
+					{
+						velocity_profile_temp[k] = raw_cube_mpi[0].data[i][j][k]*1E5;
+					}
+					else
+					{
+						velocity_profile_temp[k] = 0;
+					}
+					//printf("%d %f\n", k, velocity_profile_temp[k]);
+				}
+				// sort the velocity profile to estimiate its maximum amplitude which is used for calculating an initial estimate for error
+				qsort(&velocity_profile_temp[0], nax3, sizeof(double), cmp);
+				for(k=0; k<nax3; k++)
+				{
+					velocity_profile_temp[k] = velocity_profile_temp[k]/1E5;
+				}
+				amp_profile_min = velocity_profile_temp[nax3-1]; // minimum amp
+				amp_profile_max = velocity_profile_temp[0]; // maximum amp
+				TRparam[0].vel_profile_res_SIGMA = velocity_profile_temp[0]*0.01; // set profile errors to 1% of the maximum amplitude 
+				//free(velocity_profile_temp);
+
+				// normalise profile
+				for(k=0; k<1*nax3; k++)
+				{
+					if(raw_cube_mpi[0].data[i][j][k]+1 > raw_cube_mpi[0].data[i][j][k]) // not blank	
+					{
+						TRparam[0].velocity_profile[k] = raw_cube_mpi[0].data[i][j][k];
+					}
+					else
+					{
+						TRparam[0].velocity_profile[k] = 1E-5;
+					}
+					TRparam[0].velocity_profile_norm[k] = (TRparam[0].velocity_profile[k]-amp_profile_min)/(amp_profile_max-amp_profile_min);
+				}
+
+				// NOTE: adjust the priors (e.g., sigma values) and the tolerance level : 0.1 would be fine..
+				//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+				// 1. single Gaussian fit
+				/* update uniform priors for gaussian function based on the above single Gaussian fit */
+				// 1. background
+				TRparam[0].g01 = 0.0;
+				TRparam[0].g02 = 0.3;
+				// 2. sigma
+				//TRparam[0].gS1 = 0.01*fabs(TRparam[0].Velocity_Seperation / (vel_max - vel_min)); // channel resolution in unit
+				TRparam[0].gS1 = 0.01;
+				TRparam[0].gS2 = 0.2;
+				// 3. amplitude
+				//TRparam[0].gA1 = 0.01 * sqrt(2*M_PI)*TRparam[0].gS1; // this is calculated from sqrt(2pi)*gS1
+				//TRparam[0].gA1 = 0.01*sqrt(2*M_PI)*TRparam[0].gS1;
+				TRparam[0].gA1 = 0.0;
+				//TRparam[0].gA2 = 1.0 * sqrt(2*M_PI)*TRparam[0].gS2; // this is calculated from sqrt(2pi)*gS2
+				TRparam[0].gA2 = 0.1;
+
+				// 4. centre
+				TRparam[0].gX1 = 0.1;
+				TRparam[0].gX2 = 0.9;
+
+				// start multinest
+				multinest_param[0].nlive = 80;
+				multinest_param[0].maxiter = 0;
 				multinest_param[0].tol = 0.1;
 				multinest_param[0].efr = 0.9;
 
@@ -705,7 +1385,42 @@ void ext_bulk_motions(int xlower, int xupper, int ylower, int yupper, multinest_
 					for(_n0=1; _n0<n_gauss_upto+1; _n0++)
 					{
 						TRparam[0].n_gauss = _n0;
-						Gfit_multinest_student(multinest_param, TRparam);
+						my_thread_args->status = 0;
+
+/*	
+						thr_id = pthread_create(&p_thread_gfit, NULL, Gfit_multinest_student_thread, (void *)my_thread_args);
+						if (thr_id != 0)
+						{
+							printf("can't create thread: %s\n", strerror(thr_id));
+							exit(1);
+						}
+
+						//Gfit_multinest_student(multinest_param, TRparam); // normal multinest without the thread option
+
+						double _t=0;
+						int thread_status=0;
+						while(1)
+						{
+							_t += 1;
+							sleep(1);
+
+							if(my_thread_args->status == 1)
+							{
+								//printf("exit normally\n");
+								pthread_join(p_thread_gfit, (void **)&thread_status);
+								break;
+							}
+
+							if(_t > multinest_time_limit)
+							{
+								printf("x:%d y:%d - %d Gaussians (%.0f sec elapsed) -> FORCED TO EXIT\n", i, j, TRparam[0].n_gauss, _t);
+								pthread_cleanup_push(cleanup, "thread first handler");
+								pthread_cleanup_pop(0);
+								pthread_exit((void *)2);
+								break;
+							}
+						}
+*/
 
 						for(_n1=0; _n1<_n0; _n1++)
 						{
@@ -1064,6 +1779,8 @@ gfit_params_mpi[0].data[i][j][(int)gfit_params_mpi[0].data[i][j][0][0][5]-1][1][
 		//	i = nax1-2;
 	}
 
+	my_thread_args->status = 1; // finished normally
+
 	free(gfit_bic_temp[0]);
 	free(gfit_bic_temp);
 	free(gfit_A_temp[0]);
@@ -1076,6 +1793,34 @@ int cmp(const void *vp, const void *vq)
     const double *q = vq;
     double diff = *p - *q;
     return ((diff >= 0.0) ? ((diff > 0.0) ? -1 : 0) : +1);
+}
+
+
+int check_thread_status(int thread_status, int time_limit, int rank)
+{
+    int i;
+
+    // wait for time_limit sec
+    for(i=0; i<time_limit; i++)
+    {
+        // thread_status is 1 when the thread is finished.
+        if(thread_status == 1)
+		{
+			return 1;
+		}
+		else
+		{
+			sleep(1);
+		}
+	printf("rank:%d running %3d sec < %3d\n", rank, i, time_limit);
+    }
+
+    return 0;
+}
+
+void cleanup(void *arg)
+{
+    printf("cleanup: %s\n", (char *)arg);
 }
 
 
