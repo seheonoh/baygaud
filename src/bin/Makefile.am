@@ -17,7 +17,7 @@ DIR_CFITSIO = /mnt/g0/research/packages/cfitsio/cfitsio
 DIR_GSL = /mnt/g0/research/packages/gsl/gsl-1.16/.libs
 
 
-AM_CFLAGS= -O3 -DMPI -fopenmp -m64 -g -I$(top_srcdir)/src/lib -I$(DIR_CFITSIO) -I$(DIR_GSL)
+AM_CFLAGS= -O3 -DMPI -fopenmp -m64 -g -I$(top_srcdir)/src/lib -I$(DIR_CFITSIO) -I$(DIR_GSL) -mcmodel=large
 
 # the program to build (the names of the final binaries)
 bin_PROGRAMS= baygaud

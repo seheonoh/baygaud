@@ -1,7 +1,7 @@
 #!/bin/bash
 # setup_baygaud.sh 
 # by Se-Heon Oh (KASI/ICRAR)
-# Version v1.0.0
+# Version v1.2.0
 
 #......................
 # PRE-STEP FOR AUTOCONF

@@ -7,7 +7,7 @@ DIR_CFITSIO = /mnt/g0/research/packages/cfitsio/cfitsio
 DIR_GSL = /mnt/g0/research/packages/gsl/gsl-1.16/.libs
 
 # additional include paths necessary to compile baygaud
-AM_CFLAGS= -O3 -DMPI -fopenmp -m64 -g -I$(top_srcdir)/src/lib -I$(DIR_CFITSIO) -I$(DIR_GSL)
+AM_CFLAGS= -O3 -DMPI -fopenmp -m64 -g -I$(top_srcdir)/src/lib -I$(DIR_CFITSIO) -I$(DIR_GSL) -mcmodel=large
 
 # the library names to build (note we are building static libs only)
 lib_LIBRARIES = libbaygaud.a

@@ -165,12 +165,12 @@ ETAGS = etags
 CTAGS = ctags
 am__DIST_COMMON = $(srcdir)/Makefile.in $(top_srcdir)/depcomp
 DISTFILES = $(DIST_COMMON) $(DIST_SOURCES) $(TEXINFOS) $(EXTRA_DIST)
-ACLOCAL = ${SHELL} /mnt/g0/research/packages/baygaud.v1.0.0/missing aclocal-1.15
+ACLOCAL = ${SHELL} /mnt/g0/research/packages/baygaud.v1.2.0/missing aclocal-1.15
 AMTAR = $${TAR-tar}
 AM_DEFAULT_VERBOSITY = 1
-AUTOCONF = ${SHELL} /mnt/g0/research/packages/baygaud.v1.0.0/missing autoconf
-AUTOHEADER = ${SHELL} /mnt/g0/research/packages/baygaud.v1.0.0/missing autoheader
-AUTOMAKE = ${SHELL} /mnt/g0/research/packages/baygaud.v1.0.0/missing automake-1.15
+AUTOCONF = ${SHELL} /mnt/g0/research/packages/baygaud.v1.2.0/missing autoconf
+AUTOHEADER = ${SHELL} /mnt/g0/research/packages/baygaud.v1.2.0/missing autoheader
+AUTOMAKE = ${SHELL} /mnt/g0/research/packages/baygaud.v1.2.0/missing automake-1.15
 AWK = mawk
 CC = mpif90
 CCDEPMODE = depmode=gcc3
@@ -199,7 +199,7 @@ LIBOBJS =
 LIBS = -lnest3_mpioff -lm -lgsl -lcfitsio 
 LN_S = ln -s
 LTLIBOBJS = 
-MAKEINFO = ${SHELL} /mnt/g0/research/packages/baygaud.v1.0.0/missing makeinfo
+MAKEINFO = ${SHELL} /mnt/g0/research/packages/baygaud.v1.2.0/missing makeinfo
 MKDIR_P = /bin/mkdir -p
 OBJEXT = o
 PACKAGE = baygaud
@@ -215,10 +215,10 @@ SET_MAKE =
 SHELL = /bin/bash
 STRIP = 
 VERSION = 1.0.0
-abs_builddir = /mnt/g0/research/packages/baygaud.v1.0.0/src/bin
-abs_srcdir = /mnt/g0/research/packages/baygaud.v1.0.0/src/bin
-abs_top_builddir = /mnt/g0/research/packages/baygaud.v1.0.0
-abs_top_srcdir = /mnt/g0/research/packages/baygaud.v1.0.0
+abs_builddir = /mnt/g0/research/packages/baygaud.v1.2.0/src/bin
+abs_srcdir = /mnt/g0/research/packages/baygaud.v1.2.0/src/bin
+abs_top_builddir = /mnt/g0/research/packages/baygaud.v1.2.0
+abs_top_srcdir = /mnt/g0/research/packages/baygaud.v1.2.0
 ac_ct_CC = mpif90
 ac_ct_CXX = g++
 am__include = include
@@ -238,7 +238,7 @@ host_alias =
 htmldir = ${docdir}
 includedir = ${prefix}/include
 infodir = ${datarootdir}/info
-install_sh = ${SHELL} /mnt/g0/research/packages/baygaud.v1.0.0/install-sh
+install_sh = ${SHELL} /mnt/g0/research/packages/baygaud.v1.2.0/install-sh
 libdir = ${exec_prefix}/lib
 libexecdir = ${exec_prefix}/libexec
 localedir = ${datarootdir}/locale
@@ -270,7 +270,7 @@ DIR_CFITSIO = /mnt/g0/research/packages/cfitsio/cfitsio
 #++++++++++
 # 3/3. gsl
 DIR_GSL = /mnt/g0/research/packages/gsl/gsl-1.16/.libs
-AM_CFLAGS = -O3 -DMPI -fopenmp -m64 -g -I$(top_srcdir)/src/lib -I$(DIR_CFITSIO) -I$(DIR_GSL)
+AM_CFLAGS = -O3 -DMPI -fopenmp -m64 -g -I$(top_srcdir)/src/lib -I$(DIR_CFITSIO) -I$(DIR_GSL) -mcmodel=large
 
 # list of sources for the 'baygaud' binary
 baygaud_SOURCES = baygaud.c

@@ -45,6 +45,9 @@
 #include <float.h>
 #include <time.h>
 
+#include <sys/time.h>
+#include <sys/resource.h>
+
 // 2DBAT user defined functions
 // memory related
 
@@ -57,6 +60,8 @@ void malloc_2dmap_arrays_bvf(int nax1, int nax2, float *fits_pointer);
 void malloc_3dcube_arrays(int nax1, int nax2, int nax3, float *fits_pointer);
 //
 void malloc_gfit_params(int nax1, int nax2, int n_gauss, int gfit_params);
+//
+void stacksize_();
 
 // --- End of line
 

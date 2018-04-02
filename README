@@ -3,6 +3,7 @@
 # by SE-HEON OH (KASI/ICRAR) + WALLABY KINEMATICS WORKING GROUP                          +
 # -------------------------------------------------------------------------------------- +
 # baygaud README by Se-Heon Oh
+# version 1.2.0 (02 Apr 2018; thread version; memory leak solved)
 # version 1.1.0 (24 Mar 2018; thread version)
 # version 1.0.0 (28 Feb 2018)
 

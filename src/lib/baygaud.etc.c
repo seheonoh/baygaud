@@ -92,6 +92,7 @@ void usage_baygaud()
     printf("+ -------------------------------------------------------------------------------------- +\n");
     printf("+                                                                                        +\n");
     printf("+ Development history                                                                    +\n");
+    printf("+ : V.1.2.0 02/Apr/2018 (threaded version; memory leak solved)                           +\n");
     printf("+ : V.1.1.0 24/Mar/2018 (threaded version)                                               +\n");
     printf("+ : V.1.0.0 28/Feb/2018                                                                  +\n");
     printf("+                                                                                        +\n");
@@ -123,6 +124,9 @@ void usage_baygaud()
     printf("+  ..................................................................................... +\n");
     printf("+ E. MAX TIME limit for each multinest run --------------------------------------------- +\n");
     printf("+  [11. multinest_time_limit= 600 SEC for each multinset run]                            +\n");
+    printf("+  ..................................................................................... +\n");
+    printf("+ F. S/N limit for multiple Gaussian fits ---------------------------------------------- +\n");
+    printf("+  [12. profile_sn_limit= 3]                                                             +\n");
     printf("+  ------------------------------------------------------------------------------------- +\n");
     printf("+                                                                                        +\n");
     printf("+ ! EXAMPLE ---------------------------------------------------------------------------- +\n");
@@ -133,7 +137,7 @@ void usage_baygaud()
     printf("+ input-ref-vf.fits \\                                                                    +\n");
     printf("+ 4 \\                                                                                    +\n");
     printf("+ 100 100 140 140 \\                                                                      +\n");
-    printf("+ _sub1 0 600                                                                            +\n");
+    printf("+ _sub1 0 600 3                                                                          +\n");
     printf("+                                                                                        +\n");
     printf("+ -------------------------------------------------------------------------------------- +\n\n");
 }

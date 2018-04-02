@@ -12,14 +12,8 @@
 /* Define to 1 if you have the `gsl' library (-lgsl). */
 #undef HAVE_LIBGSL
 
-/* Define to 1 if you have the `lapack' library (-llapack). */
-#undef HAVE_LIBLAPACK
-
 /* Define to 1 if you have the `m' library (-lm). */
 #undef HAVE_LIBM
-
-/* Define to 1 if you have the `nest3' library (-lnest3). */
-#undef HAVE_LIBNEST3
 
 /* Define to 1 if you have the `nest3_mpioff' library (-lnest3_mpioff). */
 #undef HAVE_LIBNEST3_MPIOFF
@@ -75,9 +69,6 @@
 
 /* Define to the one symbol short name of this package. */
 #undef PACKAGE_TARNAME
-
-/* Define to the home page for this package. */
-#undef PACKAGE_URL
 
 /* Define to the version of this package. */
 #undef PACKAGE_VERSION

@@ -219,6 +219,7 @@ typedef struct {
 	int process_Y1;
 	int status; // 0: problem 1: ok
 	int rank;
+	int profile_sn_limit;
 	double multinest_time_limit; // time limit for each multinest run
 } ThreadArgs;
 

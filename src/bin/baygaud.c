@@ -1,13 +1,13 @@
 #include "baygaud.main.h"
 
-# define N_PROCESS_MAX 128
+# define N_PROCESS_MAX 1024
 # define MAX_TIME_LIMIT 1E6 // SEC
 
 // --- Main program --- //
 int main(int argc, char *argv[])
 {
 
-	if(argc != 12) // 1:wdir 2:cube.fits (m/s) 3:ref.vf.fits (km/s) 4:xlower 5:ylower 6:xupper 7:yupper
+	if(argc != 13) // 1:wdir 2:cube.fits (m/s) 3:ref.vf.fits (km/s) 4:xlower 5:ylower 6:xupper 7:yupper
 	{
 		usage_baygaud();
 		exit(0);
@@ -77,6 +77,13 @@ int main(int argc, char *argv[])
 	int gauss_number_primary=0, gauss_number_lowest=0, gauss_number_cold=0, gauss_number_warm=0, gauss_number_strong_nonc=0, gauss_number_weak_nonc=0, gauss_number_hvc=0;
 
 	double multinest_time_limit=0;
+
+	// To resolve the issue associated with a loarge amount of memory requested in HPC
+	// - Including "ulimit -s unlimited" in the .bashrc or in the .bash_profile files (but not in my case).
+	// Including the option "-heap-arrays" when compiling the application, but in my case the tasks "eat" all the memory of the computing nodes and they "died".
+	// Including the option "-mcmodel=large" when compiling the application, but it didn't work in my case.
+	// call the following function at the very beginning of the code..
+	stacksize_();
 
     MPI_Status mpistatus;
     MPI_Request request[10];
@@ -369,9 +376,9 @@ nlx2(2) |__|__|  x nax3(5)
 		ThreadArgs *thread_args;
 		thread_args = (ThreadArgs *)malloc(sizeof(ThreadArgs));
 		thread_args->multinest_time_limit = atof(argv[11]);; // sec : time limit for each multinest run
+		thread_args->profile_sn_limit = atof(argv[12]);; // sn : s/n limit for multiple gaussian decomposition
 
 		ext_bulk_motions(process_X[rank][0], process_X[rank][1], process_Y[rank][0], process_Y[rank][1], multinest_param, TRparam, sorting_order, raw_cube_mpi[0].data, rank, thread_args);
-
 		/*++++++++++++++++++++++++++++++++++++++++++*/
 		// receive gfit_results from sub-nodes
 		for(n=0; n<n_node-1; n++)
@@ -379,13 +386,15 @@ nlx2(2) |__|__|  x nax3(5)
 			i0 = process_X[n+1][0];
 			j0 = process_Y[n+1][0];
 			MPI_Recv(&gfit_params_mpi[0].data[i0][j0][0][0][0], 1, sub_gfit_params, n+1, 222, MPI_COMM_WORLD, &mpistatus);
-		}
-		for(n=0; n<n_node-1; n++)
-		{
-			i0 = process_X[n+1][0];
-			j0 = process_Y[n+1][0];
 			MPI_Recv(&gfit_params_e_mpi[0].data[i0][j0][0][0][0], 1, sub_gfit_params, n+1, 333, MPI_COMM_WORLD, &mpistatus);
 		}
+		//for(n=0; n<n_node-1; n++)
+		//{
+		//	i0 = process_X[n+1][0];
+		//	j0 = process_Y[n+1][0];
+		//	MPI_Recv(&gfit_params_e_mpi[0].data[i0][j0][0][0][0], 1, sub_gfit_params, n+1, 333, MPI_COMM_WORLD, &mpistatus);
+		//}
+
 
     }
     // ------------------------------------------------------------ //
@@ -448,6 +457,8 @@ nlx2(2) |__|__|  x nax3(5)
 
 	if(rank == 0)
 	{
+		printf("\n-> Combine the cubelets from the slave nodes... [completed]\n");
+		printf("-> Classify the Gaussian components... ");
 		for(n=0; n<n_node; n++)
 		{
 			i0 = process_X[n][0];
@@ -469,6 +480,8 @@ nlx2(2) |__|__|  x nax3(5)
 				{
 					BVF_analysis[k].data[j][i] = 1E90;
 					BVF_analysis_e[k].data[j][i] = 1E90;
+					BVF[k].data[j][i] = 1E90;
+					BVF_e[k].data[j][i] = 1E90;
 				}
 			}
 		}
@@ -479,150 +492,422 @@ nlx2(2) |__|__|  x nax3(5)
 			//for(j=0; j<TRparam[0].nax2; j++)
 			for(j=ylower; j<yupper; j++)
 			{
+				//if(!isinf(raw_cube_mpi[0].data[i][j][0]) && !isnan(raw_cube_mpi[0].data[i][j][TRparam[0].nax3-1]) && !isinf(HI_VF[0].data[j][i]) && !isnan(HI_VF[0].data[j][i])
+				//	&& gfit_params_mpi[0].data[i][j][0][0][0] != 3504) // not blank and multinest finished normally : see baygaud.gfit.c  flag
 				if(!isinf(raw_cube_mpi[0].data[i][j][0]) && !isnan(raw_cube_mpi[0].data[i][j][TRparam[0].nax3-1]) && !isinf(HI_VF[0].data[j][i]) && !isnan(HI_VF[0].data[j][i]))
-				{
-					opt_gauss_number = gfit_params_mpi[0].data[i][j][0][0][5];
-
-					// +++++++++++++++++++++++++++++++++++++++++++++++++
-					// sort vel_sort: observed - reference : better to be re-written for a simplitity: refer to vel_gauss_n_sort below...
-					for(_ng=0; _ng<opt_gauss_number; _ng++)
+				{ 
+					if(gfit_params_mpi[0].data[i][j][0][0][5] != -1) // multinest runs not failed..
 					{
-						vel_sort[_ng][0] = 1E9; // default value
-						vel_sort[_ng][1] = 1E9; // default large value
-					}
-					for(_ng=0; _ng<opt_gauss_number; _ng++)
-					{
-						vel_sort[_ng][0] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][3]; // Xo of the current gaussian
-						//HI_VF[0].data[j][i] in km/s : input reference velocity field
-						vel_sort[_ng][1] = fabs(gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][3] - 1E3*HI_VF[0].data[j][i])*1E3; // absolute velocity difference between Xo and the ref velocity provided: multipled by 1E3 to used the integer comparison function, array2D_comp
-					}
-					qsort(vel_sort, opt_gauss_number, sizeof(vel_sort[0]), array2D_comp);
-					//printf("%d %d ref:%f bulk:%f\n", i, j, HI_VF[0].data[j][i], vel_sort[0][0]);
-
-					// +++++++++++++++++++++++++++++++++++++++++++++++++
-					// sort vel_gauss_n_sort: observed - reference : this is for hvc detection.
-					for(_ng=0; _ng<opt_gauss_number; _ng++)
-					{
-						vel_gauss_n_sort[_ng][0] = 1E9; // default value
-						vel_gauss_n_sort[_ng][1] = 1E9; // default large value
-					}
-					for(_ng=0; _ng<opt_gauss_number; _ng++)
-					{
-						vel_gauss_n_sort[_ng][0] = _ng; // Xo of the current gaussian
-						vel_gauss_n_sort[_ng][1] = fabs(gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][3] - 1E3*HI_VF[0].data[j][i])*1E3; // absolute velocity difference between Xo and the ref velocity provided: multipled by 1E3 to used the integer comparison function, array2D_comp
-					}
-					qsort(vel_gauss_n_sort, opt_gauss_number, sizeof(vel_gauss_n_sort[0]), array2D_comp);
-					//printf("%d %d ref:%f bulk:%f\n", i, j, 1E3*HI_VF[0].data[j][i], vel_gauss_n_sort[0][0]);
-
-
-					// +++++++++++++++++++++++++++++++++++++++++++++++++
-					// sort amp: observed
-					for(_ng=0; _ng<opt_gauss_number; _ng++)
-					{
-						amp_sort[_ng][0] = 1E9; // default value
-						amp_sort[_ng][1] = 1E9; // default large value
-					}
-					for(_ng=0; _ng<opt_gauss_number; _ng++)
-					{
-						amp_sort[_ng][0] = _ng; // gaussian component number
-						amp_sort[_ng][1] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][1]*1E5; // amplitude: multipled by 1E5 to used the integer comparison function, array2D_comp
-					}
-					qsort(amp_sort, opt_gauss_number, sizeof(amp_sort[0]), array2D_comp);
-					//printf("%d %d ref:%f bulk:%f\n", i, j, HI_VF[0].data[j][i], amp_sort[0][0]);
-
-					// +++++++++++++++++++++++++++++++++++++++++++++++++
-					// sort sigma: observed
-					for(_ng=0; _ng<opt_gauss_number; _ng++)
-					{
-						disp_sort[_ng][0] = 1E9; // default value
-						disp_sort[_ng][1] = 1E9; // default large value
-					}
-					for(_ng=0; _ng<opt_gauss_number; _ng++)
-					{
-						disp_sort[_ng][0] = _ng; // gaussian component number
-						disp_sort[_ng][1] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][2]*1E3; // dispersion (gaussian sigma term): multipled by 1E3 to used the integer comparison function, array2D_comp
-					}
-					qsort(disp_sort, opt_gauss_number, sizeof(disp_sort[0]), array2D_comp);
-					//printf("%d %d ref:%f bulk:%f\n", i, j, HI_VF[0].data[j][i], disp_sort[0][0]);
-
-					// <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-					// <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-					// <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-					// Extract specific kinematic component
-					// ................................................................................................................
-					for(_ng=0; _ng<opt_gauss_number; _ng++) // search for the corresponding gaussian component to the found bulk motion
-					{
-
-						// *****************************************************************************************
-						// 1. bulk velocity field [0 ~ 9] : (1) vel_sort < 0.1 match... it's not limit yet..; (2) sigma > 1 channel; (3) s/n > sn_profile_limit
-						// *****************************************************************************************
-						if(fabs(gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][3] - vel_sort[0][0]) < 0.1 &&
-							gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][2] > channel_resolution &&  // sigma > 1 channel
-							gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][7] > sn_profile_limit) // s/n > sn_profile_limit
+						opt_gauss_number = (int)gfit_params_mpi[0].data[i][j][0][0][5];
+						// +++++++++++++++++++++++++++++++++++++++++++++++++
+						// sort vel_sort: observed - reference : better to be re-written for a simplitity: refer to vel_gauss_n_sort below...
+						for(_ng=0; _ng<opt_gauss_number; _ng++)
 						{
-							for(_ng2=0; _ng2<8; _ng2++)
-							{
-								// 0:background, 1:amplitude, 2:sigma, 3:centre, 4:bic, 5:none(opt-N-gauss), 6:std, 7:s/n
-								BVF_analysis[10*0+_ng2].data[j][i] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][_ng2];
-								BVF_analysis_e[10*0+_ng2].data[j][i] = gfit_params_e_mpi[0].data[i][j][opt_gauss_number-1][_ng][_ng2];
-							}
-								BVF_analysis[10*0+2].data[j][i] = BVF_analysis[10*0+2].data[j][i] / 1000.; // in km/s
-								BVF_analysis_e[10*0+2].data[j][i] = BVF_analysis_e[10*0+2].data[j][i] / 1000.; // in km/s
-								BVF_analysis[10*0+3].data[j][i] = BVF_analysis[10*0+3].data[j][i] / 1000.; // in km/s
-								BVF_analysis_e[10*0+3].data[j][i] = BVF_analysis_e[10*0+3].data[j][i] / 1000.; // in km/s
-								BVF_analysis[10*0+_ng2+0].data[j][i] = 1E90;
-								BVF_analysis[10*0+_ng2+1].data[j][i] = 1E90;
-								BVF_analysis_e[10*0+_ng2+0].data[j][i] = 1E90;
-								BVF_analysis_e[10*0+_ng2+1].data[j][i] = 1E90;
+							vel_sort[_ng][0] = 1E9; // default value
+							vel_sort[_ng][1] = 1E9; // default large value
 						}
-
-						if(opt_gauss_number == 1 && // if optimal_n_gauss == 1
-							fabs(gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][3]-1E3*HI_VF[0].data[j][i]) < vel_bulk_limit && // in m/s
-							gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][2] > channel_resolution &&  // sigma > 1 channel
-							gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][7] > sn_profile_limit) // s/n > sn_profile_limit
+						for(_ng=0; _ng<opt_gauss_number; _ng++)
 						{
-							for(_ng2=0; _ng2<8; _ng2++)
-							{
-								// 0:background, 1:amplitude, 2:sigma, 3:centre, 4:bic, 5:none(opt-N-gauss), 6:std, 7:s/n
-								BVF_analysis[10*0+_ng2].data[j][i] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][_ng2];
-								BVF_analysis_e[10*0+_ng2].data[j][i] = gfit_params_e_mpi[0].data[i][j][opt_gauss_number-1][_ng][_ng2];
-							}
-								BVF_analysis[10*0+2].data[j][i] = BVF_analysis[10*0+2].data[j][i] / 1000.; // in km/s
-								BVF_analysis_e[10*0+2].data[j][i] = BVF_analysis_e[10*0+2].data[j][i] / 1000.; // in km/s
-								BVF_analysis[10*0+3].data[j][i] = BVF_analysis[10*0+3].data[j][i] / 1000.; // in km/s
-								BVF_analysis_e[10*0+3].data[j][i] = BVF_analysis_e[10*0+3].data[j][i] / 1000.; // in km/s
-								BVF_analysis[10*0+_ng2+0].data[j][i] = 1E90;
-								BVF_analysis[10*0+_ng2+1].data[j][i] = 1E90;
-								BVF_analysis_e[10*0+_ng2+0].data[j][i] = 1E90;
-								BVF_analysis_e[10*0+_ng2+1].data[j][i] = 1E90;
+							vel_sort[_ng][0] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][3]; // Xo of the current gaussian
+							//HI_VF[0].data[j][i] in km/s : input reference velocity field
+							vel_sort[_ng][1] = fabs(gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][3] - 1E3*HI_VF[0].data[j][i])*1E3; // absolute velocity difference between Xo and the ref velocity provided: multipled by 1E3 to used the integer comparison function, array2D_comp
 						}
+						qsort(vel_sort, opt_gauss_number, sizeof(vel_sort[0]), array2D_comp);
+						//printf("%d %d ref:%f bulk:%f\n", i, j, HI_VF[0].data[j][i], vel_sort[0][0]);
 
-						// *****************************************************************************************
-						// 2. perfect single gaussian fit [10 ~ 19] : (1) optimal_n_gauss == 1; (2) sigma > 1 channel; (3) s/n > sn_profile_limit
-						// *****************************************************************************************
-						if(opt_gauss_number == 1 &&
-							gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][2] > channel_resolution &&  // sigma > 1 channel
-							gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][7] > sn_profile_limit) // s/n > sn_profile_limit
+						// +++++++++++++++++++++++++++++++++++++++++++++++++
+						// sort vel_gauss_n_sort: observed - reference : this is for hvc detection.
+						for(_ng=0; _ng<opt_gauss_number; _ng++)
 						{
-							for(_ng2=0; _ng2<8; _ng2++)
-							{
-								// 0:background, 1:amplitude, 2:sigma, 3:centre, 4:bic, 5:none(opt-N-gauss), 6:std, 7:s/n
-								BVF_analysis[10*1+_ng2].data[j][i] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][_ng2];
-								BVF_analysis_e[10*1+_ng2].data[j][i] = gfit_params_e_mpi[0].data[i][j][opt_gauss_number-1][_ng][_ng2];
-							}
-								BVF_analysis[10*1+2].data[j][i] = BVF_analysis[10*1+2].data[j][i] / 1000.; // in km/s
-								BVF_analysis_e[10*1+2].data[j][i] = BVF_analysis_e[10*1+2].data[j][i] / 1000.; // in km/s
-								BVF_analysis[10*1+3].data[j][i] = BVF_analysis[10*1+3].data[j][i] / 1000.; // in km/s
-								BVF_analysis_e[10*1+3].data[j][i] = BVF_analysis_e[10*1+3].data[j][i] / 1000.; // in km/s
-								BVF_analysis[10*1+_ng2+0].data[j][i] = 1E90;
-								BVF_analysis[10*1+_ng2+1].data[j][i] = 1E90;
-								BVF_analysis_e[10*1+_ng2+0].data[j][i] = 1E90;
-								BVF_analysis_e[10*1+_ng2+1].data[j][i] = 1E90;
+							vel_gauss_n_sort[_ng][0] = 1E9; // default value
+							vel_gauss_n_sort[_ng][1] = 1E9; // default large value
 						}
+						for(_ng=0; _ng<opt_gauss_number; _ng++)
+						{
+							vel_gauss_n_sort[_ng][0] = _ng; // Xo of the current gaussian
+							vel_gauss_n_sort[_ng][1] = fabs(gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][3] - 1E3*HI_VF[0].data[j][i])*1E3; // absolute velocity difference between Xo and the ref velocity provided: multipled by 1E3 to used the integer comparison function, array2D_comp
+						}
+						qsort(vel_gauss_n_sort, opt_gauss_number, sizeof(vel_gauss_n_sort[0]), array2D_comp);
+						//printf("%d %d ref:%f bulk:%f\n", i, j, 1E3*HI_VF[0].data[j][i], vel_gauss_n_sort[0][0]);
 
+
+						// +++++++++++++++++++++++++++++++++++++++++++++++++
+						// sort amp: observed
+						for(_ng=0; _ng<opt_gauss_number; _ng++)
+						{
+							amp_sort[_ng][0] = 1E9; // default value
+							amp_sort[_ng][1] = 1E9; // default large value
+						}
+						for(_ng=0; _ng<opt_gauss_number; _ng++)
+						{
+							amp_sort[_ng][0] = _ng; // gaussian component number
+							amp_sort[_ng][1] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][1]*1E5; // amplitude: multipled by 1E5 to used the integer comparison function, array2D_comp
+						}
+						qsort(amp_sort, opt_gauss_number, sizeof(amp_sort[0]), array2D_comp);
+						//printf("%d %d ref:%f bulk:%f\n", i, j, HI_VF[0].data[j][i], amp_sort[0][0]);
+
+						// +++++++++++++++++++++++++++++++++++++++++++++++++
+						// sort sigma: observed
+						for(_ng=0; _ng<opt_gauss_number; _ng++)
+						{
+							disp_sort[_ng][0] = 1E9; // default value
+							disp_sort[_ng][1] = 1E9; // default large value
+						}
+						for(_ng=0; _ng<opt_gauss_number; _ng++)
+						{
+							disp_sort[_ng][0] = _ng; // gaussian component number
+							disp_sort[_ng][1] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][2]*1E3; // dispersion (gaussian sigma term): multipled by 1E3 to used the integer comparison function, array2D_comp
+						}
+						qsort(disp_sort, opt_gauss_number, sizeof(disp_sort[0]), array2D_comp);
+						//printf("%d %d ref:%f bulk:%f\n", i, j, HI_VF[0].data[j][i], disp_sort[0][0]);
+						
+						// <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+						// <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+						// <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+						// Extract specific kinematic component
+						// ................................................................................................................
+						for(_ng=0; _ng<opt_gauss_number; _ng++) // search for the corresponding gaussian component to the found bulk motion
+						{
+							// *****************************************************************************************
+							// 1. bulk velocity field [0 ~ 9] : (1) vel_sort < 0.1 match... it's not limit yet..; (2) sigma > 1 channel; (3) s/n > sn_profile_limit
+							// *****************************************************************************************
+							if(fabs(gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][3] - vel_sort[0][0]) < 0.1 &&
+								gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][2] > channel_resolution &&  // sigma > 1 channel
+								gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][7] > sn_profile_limit) // s/n > sn_profile_limit
+							{
+								for(_ng2=0; _ng2<8; _ng2++)
+								{
+									// 0:background, 1:amplitude, 2:sigma, 3:centre, 4:bic, 5:none(opt-N-gauss), 6:std, 7:s/n
+									BVF_analysis[10*0+_ng2].data[j][i] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][_ng2];
+									BVF_analysis_e[10*0+_ng2].data[j][i] = gfit_params_e_mpi[0].data[i][j][opt_gauss_number-1][_ng][_ng2];
+								}
+									BVF_analysis[10*0+2].data[j][i] = BVF_analysis[10*0+2].data[j][i] / 1000.; // in km/s
+									BVF_analysis_e[10*0+2].data[j][i] = BVF_analysis_e[10*0+2].data[j][i] / 1000.; // in km/s
+									BVF_analysis[10*0+3].data[j][i] = BVF_analysis[10*0+3].data[j][i] / 1000.; // in km/s
+									BVF_analysis_e[10*0+3].data[j][i] = BVF_analysis_e[10*0+3].data[j][i] / 1000.; // in km/s
+									BVF_analysis[10*0+_ng2+0].data[j][i] = 1E90;
+									BVF_analysis[10*0+_ng2+1].data[j][i] = 1E90;
+									BVF_analysis_e[10*0+_ng2+0].data[j][i] = 1E90;
+									BVF_analysis_e[10*0+_ng2+1].data[j][i] = 1E90;
+							}
+
+							if(opt_gauss_number == 1 && // if optimal_n_gauss == 1
+								fabs(gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][3]-1E3*HI_VF[0].data[j][i]) < vel_bulk_limit && // in m/s
+								gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][2] > channel_resolution &&  // sigma > 1 channel
+								gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][7] > sn_profile_limit) // s/n > sn_profile_limit
+							{
+								for(_ng2=0; _ng2<8; _ng2++)
+								{
+									// 0:background, 1:amplitude, 2:sigma, 3:centre, 4:bic, 5:none(opt-N-gauss), 6:std, 7:s/n
+									BVF_analysis[10*0+_ng2].data[j][i] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][_ng2];
+									BVF_analysis_e[10*0+_ng2].data[j][i] = gfit_params_e_mpi[0].data[i][j][opt_gauss_number-1][_ng][_ng2];
+								}
+									BVF_analysis[10*0+2].data[j][i] = BVF_analysis[10*0+2].data[j][i] / 1000.; // in km/s
+									BVF_analysis_e[10*0+2].data[j][i] = BVF_analysis_e[10*0+2].data[j][i] / 1000.; // in km/s
+									BVF_analysis[10*0+3].data[j][i] = BVF_analysis[10*0+3].data[j][i] / 1000.; // in km/s
+									BVF_analysis_e[10*0+3].data[j][i] = BVF_analysis_e[10*0+3].data[j][i] / 1000.; // in km/s
+									BVF_analysis[10*0+_ng2+0].data[j][i] = 1E90;
+									BVF_analysis[10*0+_ng2+1].data[j][i] = 1E90;
+									BVF_analysis_e[10*0+_ng2+0].data[j][i] = 1E90;
+									BVF_analysis_e[10*0+_ng2+1].data[j][i] = 1E90;
+							}
+
+							// *****************************************************************************************
+							// 2. perfect single gaussian fit [10 ~ 19] : (1) optimal_n_gauss == 1; (2) sigma > 1 channel; (3) s/n > sn_profile_limit
+							// *****************************************************************************************
+							if(opt_gauss_number == 1 &&
+								gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][2] > channel_resolution &&  // sigma > 1 channel
+								gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][7] > sn_profile_limit) // s/n > sn_profile_limit
+							{
+								for(_ng2=0; _ng2<8; _ng2++)
+								{
+									// 0:background, 1:amplitude, 2:sigma, 3:centre, 4:bic, 5:none(opt-N-gauss), 6:std, 7:s/n
+									BVF_analysis[10*1+_ng2].data[j][i] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][_ng2];
+									BVF_analysis_e[10*1+_ng2].data[j][i] = gfit_params_e_mpi[0].data[i][j][opt_gauss_number-1][_ng][_ng2];
+								}
+									BVF_analysis[10*1+2].data[j][i] = BVF_analysis[10*1+2].data[j][i] / 1000.; // in km/s
+									BVF_analysis_e[10*1+2].data[j][i] = BVF_analysis_e[10*1+2].data[j][i] / 1000.; // in km/s
+									BVF_analysis[10*1+3].data[j][i] = BVF_analysis[10*1+3].data[j][i] / 1000.; // in km/s
+									BVF_analysis_e[10*1+3].data[j][i] = BVF_analysis_e[10*1+3].data[j][i] / 1000.; // in km/s
+									BVF_analysis[10*1+_ng2+0].data[j][i] = 1E90;
+									BVF_analysis[10*1+_ng2+1].data[j][i] = 1E90;
+									BVF_analysis_e[10*1+_ng2+0].data[j][i] = 1E90;
+									BVF_analysis_e[10*1+_ng2+1].data[j][i] = 1E90;
+							}
+
+							// *****************************************************************************************
+							// 3. default single gaussian fit [20 ~ 29] : (1) optimal_n_gauss > 1; (2) sigma > 1 channel; (3) s/n > sn_profile_limit
+							// *****************************************************************************************
+							if(gfit_params_mpi[0].data[i][j][0][0][2] > channel_resolution &&  // sigma > 1 channel
+								gfit_params_mpi[0].data[i][j][0][0][7] > sn_profile_limit) // s/n > sn_profile_limit
+							{
+								for(_ng2=0; _ng2<8; _ng2++)
+								{
+									// 0:background, 1:amplitude, 2:sigma, 3:centre, 4:bic, 5:none(opt-N-gauss), 6:std, 7:s/n
+									BVF_analysis[10*2+_ng2].data[j][i] = gfit_params_mpi[0].data[i][j][0][0][_ng2];
+									BVF_analysis_e[10*2+_ng2].data[j][i] = gfit_params_e_mpi[0].data[i][j][0][0][_ng2];
+								}
+									BVF_analysis[10*2+2].data[j][i] = BVF_analysis[10*2+2].data[j][i] / 1000.; // in km/s
+									BVF_analysis_e[10*2+2].data[j][i] = BVF_analysis_e[10*2+2].data[j][i] / 1000.; // in km/s
+									BVF_analysis[10*2+3].data[j][i] = BVF_analysis[10*2+3].data[j][i] / 1000.; // in km/s
+									BVF_analysis_e[10*2+3].data[j][i] = BVF_analysis_e[10*2+3].data[j][i] / 1000.; // in km/s
+									BVF_analysis[10*2+_ng2+0].data[j][i] = 1E90;
+									BVF_analysis[10*2+_ng2+1].data[j][i] = 1E90;
+									BVF_analysis_e[10*2+_ng2+0].data[j][i] = 1E90;
+									BVF_analysis_e[10*2+_ng2+1].data[j][i] = 1E90;
+							}
+
+							// *****************************************************************************************
+							// 4. primary gaussian component [30 ~ 39] : (1) ; (2) sigma > 1 channel; (3) s/n > sn_profile_limit ; (4) amp is the largest
+							// *****************************************************************************************
+							gauss_number_primary = amp_sort[opt_gauss_number-1][0]; // sorted as above // gaussian component number whose amp is the biggest among the optimally decomposed ones...
+							if(opt_gauss_number > 1 && // at least the number of gaussian is larger than 1
+								gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_primary][2] > channel_resolution &&  // sigma > 1 channel
+								gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_primary][7] > sn_profile_limit) // s/n > sn_profile_limit
+							{
+								for(_ng2=0; _ng2<8; _ng2++)
+								{
+									// 0:background, 1:amplitude, 2:sigma, 3:centre, 4:bic, 5:none(opt-N-gauss), 6:std, 7:s/n
+									BVF_analysis[10*3+_ng2].data[j][i] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_primary][_ng2];
+									BVF_analysis_e[10*3+_ng2].data[j][i] = gfit_params_e_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_primary][_ng2];
+								}
+									BVF_analysis[10*3+2].data[j][i] = BVF_analysis[10*3+2].data[j][i] / 1000.; // in km/s
+									BVF_analysis_e[10*3+2].data[j][i] = BVF_analysis_e[10*3+2].data[j][i] / 1000.; // in km/s
+									BVF_analysis[10*3+3].data[j][i] = BVF_analysis[10*3+3].data[j][i] / 1000.; // in km/s
+									BVF_analysis_e[10*3+3].data[j][i] = BVF_analysis_e[10*3+3].data[j][i] / 1000.; // in km/s
+									BVF_analysis[10*3+_ng2+0].data[j][i] = 1E90;
+									BVF_analysis[10*3+_ng2+1].data[j][i] = 1E90;
+									BVF_analysis_e[10*3+_ng2+0].data[j][i] = 1E90;
+									BVF_analysis_e[10*3+_ng2+1].data[j][i] = 1E90;
+							}
+
+							// *****************************************************************************************
+							// 5. cold gaussian component [40 ~ 49] : (1) opt_gauss_number > 1; (2) sigma1 & sigma2 > 1 channel + sigma1 < sigma2; (3) s/n > sn_profile_limit;
+							// *****************************************************************************************
+							gauss_number_cold = disp_sort[0][0]; // sorted as above // gaussian component number whose dispersion is the smallest among the optimally decomposed ones...
+							if(opt_gauss_number > 1 && // at least the number of gaussian is larger than 1
+								gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_cold][2] > channel_resolution &&  // sigma > 1 channel
+								gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_cold][7] > sn_profile_limit) // s/n > sn_profile_limit
+							{
+								for(_ng2=0; _ng2<8; _ng2++)
+								{
+									// 0:background, 1:amplitude, 2:sigma, 3:centre, 4:bic, 5:none(opt-N-gauss), 6:std, 7:s/n
+									BVF_analysis[10*4+_ng2].data[j][i] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_cold][_ng2];
+									BVF_analysis_e[10*4+_ng2].data[j][i] = gfit_params_e_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_cold][_ng2];
+								}
+									BVF_analysis[10*4+2].data[j][i] = BVF_analysis[10*4+2].data[j][i] / 1000.; // in km/s
+									BVF_analysis_e[10*4+2].data[j][i] = BVF_analysis_e[10*4+2].data[j][i] / 1000.; // in km/s
+									BVF_analysis[10*4+3].data[j][i] = BVF_analysis[10*4+3].data[j][i] / 1000.; // in km/s
+									BVF_analysis_e[10*4+3].data[j][i] = BVF_analysis_e[10*4+3].data[j][i] / 1000.; // in km/s
+									BVF_analysis[10*4+_ng2+0].data[j][i] = 1E90;
+									BVF_analysis[10*4+_ng2+1].data[j][i] = 1E90;
+									BVF_analysis_e[10*4+_ng2+0].data[j][i] = 1E90;
+									BVF_analysis_e[10*4+_ng2+1].data[j][i] = 1E90;
+							}
+
+							// *****************************************************************************************
+							// 6. warm gaussian component [50 ~ 59] : (1) opt_gauss_number > 1; (2) sigma1 & sigma2 > 1 channel + sigma1 > sigma2; (3) s/n > sn_profile_limit;
+							// *****************************************************************************************
+							gauss_number_warm = disp_sort[opt_gauss_number-1][0]; // sorted as above // gaussian component number whose dispersion is the largest among the optimally decomposed ones...
+							if(opt_gauss_number > 1 && // at least the number of gaussian is larger than 1
+								gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_warm][2] > channel_resolution &&  // sigma > 1 channel
+								gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_warm][7] > sn_profile_limit) // s/n > sn_profile_limit
+							{
+								for(_ng2=0; _ng2<8; _ng2++)
+								{
+									// 0:background, 1:amplitude, 2:sigma, 3:centre, 4:bic, 5:none(opt-N-gauss), 6:std, 7:s/n
+									BVF_analysis[10*5+_ng2].data[j][i] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_warm][_ng2];
+									BVF_analysis_e[10*5+_ng2].data[j][i] = gfit_params_e_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_warm][_ng2];
+								}
+									BVF_analysis[10*5+2].data[j][i] = BVF_analysis[10*5+2].data[j][i] / 1000.; // in km/s
+									BVF_analysis_e[10*5+2].data[j][i] = BVF_analysis_e[10*5+2].data[j][i] / 1000.; // in km/s
+									BVF_analysis[10*5+3].data[j][i] = BVF_analysis[10*5+3].data[j][i] / 1000.; // in km/s
+									BVF_analysis_e[10*5+3].data[j][i] = BVF_analysis_e[10*5+3].data[j][i] / 1000.; // in km/s
+									BVF_analysis[10*5+_ng2+0].data[j][i] = 1E90;
+									BVF_analysis[10*5+_ng2+1].data[j][i] = 1E90;
+									BVF_analysis_e[10*5+_ng2+0].data[j][i] = 1E90;
+									BVF_analysis_e[10*5+_ng2+1].data[j][i] = 1E90;
+							}
+
+							// *****************************************************************************************
+							// 7. strong nonc. gaussian component [60 ~ 69] : (1) opt_gauss_number > 1; (2) not the bulk but the primary; (3) sigma > 1 channel; (4) s/n > sn_profile_limit;
+							// *****************************************************************************************
+							// first, find the primary
+							gauss_number_primary = amp_sort[opt_gauss_number-1][0]; // sorted as above // gaussian component number whose amp is the biggest among the optimally decomposed ones...
+							// second, check it the primary is bulk motion whether or not...
+							if(fabs(gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_primary][3] - vel_sort[0][0]) > 0.1) // if not the bulk motion
+							{
+								gauss_number_strong_nonc = gauss_number_primary; // sorted as above // gaussian component number whose velocitiy deviation is the largest from the bulk among the optimally decomposed ones...
+								if(opt_gauss_number > 1 && // at least the number of gaussian is larger than 1
+									gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_strong_nonc][2] > channel_resolution &&  // sigma > 1 channel
+									gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_strong_nonc][7] > sn_profile_limit) // s/n > sn_profile_limit
+								{
+									for(_ng2=0; _ng2<8; _ng2++)
+									{
+										// 0:background, 1:amplitude, 2:sigma, 3:centre, 4:bic, 5:none(opt-N-gauss), 6:std, 7:s/n
+										BVF_analysis[10*6+_ng2].data[j][i] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_strong_nonc][_ng2];
+										BVF_analysis_e[10*6+_ng2].data[j][i] = gfit_params_e_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_strong_nonc][_ng2];
+									}
+										BVF_analysis[10*6+2].data[j][i] = BVF_analysis[10*6+2].data[j][i] / 1000.; // in km/s
+										BVF_analysis_e[10*6+2].data[j][i] = BVF_analysis_e[10*6+2].data[j][i] / 1000.; // in km/s
+										BVF_analysis[10*6+3].data[j][i] = BVF_analysis[10*6+3].data[j][i] / 1000.; // in km/s
+										BVF_analysis_e[10*6+3].data[j][i] = BVF_analysis_e[10*6+3].data[j][i] / 1000.; // in km/s
+										BVF_analysis[10*6+_ng2+0].data[j][i] = 1E90;
+										BVF_analysis[10*6+_ng2+1].data[j][i] = 1E90;
+										BVF_analysis_e[10*6+_ng2+0].data[j][i] = 1E90;
+										BVF_analysis_e[10*6+_ng2+1].data[j][i] = 1E90;
+								}
+
+								/*
+								if(opt_gauss_number == 1 && // if optimal_n_gauss == 1
+									fabs(gfit_params_mpi[0].data[i][j][opt_gauss_number-1][0][3]-1E3*HI_VF[0].data[j][i]) > vel_bulk_limit && // in m/s
+									gfit_params_mpi[0].data[i][j][opt_gauss_number-1][0][2] > channel_resolution &&  // sigma > 1 channel
+									gfit_params_mpi[0].data[i][j][opt_gauss_number-1][0][7] > sn_profile_limit) // s/n > sn_profile_limit
+								{
+									for(_ng2=0; _ng2<8; _ng2++)
+									{
+										// 0:background, 1:amplitude, 2:sigma, 3:centre, 4:bic, 5:none(opt-N-gauss), 6:std, 7:s/n
+										BVF_analysis[10*6+_ng2].data[j][i] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_strong_nonc][_ng2];
+										BVF_analysis_e[10*6+_ng2].data[j][i] = gfit_params_e_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_strong_nonc][_ng2];
+									}
+										BVF_analysis[10*6+2].data[j][i] = BVF_analysis[10*6+2].data[j][i] / 1000.; // in km/s
+										BVF_analysis_e[10*6+2].data[j][i] = BVF_analysis_e[10*6+2].data[j][i] / 1000.; // in km/s
+										BVF_analysis[10*6+3].data[j][i] = BVF_analysis[10*6+3].data[j][i] / 1000.; // in km/s
+										BVF_analysis_e[10*6+3].data[j][i] = BVF_analysis_e[10*6+3].data[j][i] / 1000.; // in km/s
+										BVF_analysis[10*6+_ng2+0].data[j][i] = 1E90;
+										BVF_analysis[10*6+_ng2+1].data[j][i] = 1E90;
+										BVF_analysis_e[10*6+_ng2+0].data[j][i] = 1E90;
+										BVF_analysis_e[10*6+_ng2+1].data[j][i] = 1E90;
+								}
+								*/
+							}
+
+							// *****************************************************************************************
+							// 8. weak nonc. gaussian component [70 ~ 79] : (1) opt_gauss_number > 1; (2) not the bulk but the secondary (3) sigma > 1 channel; (4) s/n > sn_profile_limit;
+							// *****************************************************************************************
+							// first, find the primary
+							gauss_number_lowest = amp_sort[0][0]; // sorted as above // gaussian component number whose amp is the lowest among the optimally decomposed ones...
+							// second, check it the lowest is bulk motion whether or not...
+							if(fabs(gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_lowest][3] - vel_sort[0][0]) > 0.1) // if not the bulk motion
+							{
+								gauss_number_weak_nonc = gauss_number_lowest; // sorted as above // gaussian component number whose velocitiy deviation is the largest from the bulk among the optimally decomposed ones...
+								if(opt_gauss_number > 1 && // at least the number of gaussian is larger than 1
+									gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_weak_nonc][2] > channel_resolution &&  // sigma > 1 channel
+									gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_weak_nonc][7] > sn_profile_limit) // s/n > sn_profile_limit
+								{
+									for(_ng2=0; _ng2<8; _ng2++)
+									{
+										// 0:background, 1:amplitude, 2:sigma, 3:centre, 4:bic, 5:none(opt-N-gauss), 6:std, 7:s/n
+										BVF_analysis[10*7+_ng2].data[j][i] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_weak_nonc][_ng2];
+										BVF_analysis_e[10*7+_ng2].data[j][i] = gfit_params_e_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_weak_nonc][_ng2];
+									}
+										BVF_analysis[10*7+2].data[j][i] = BVF_analysis[10*7+2].data[j][i] / 1000.; // in km/s
+										BVF_analysis_e[10*7+2].data[j][i] = BVF_analysis_e[10*7+2].data[j][i] / 1000.; // in km/s
+										BVF_analysis[10*7+3].data[j][i] = BVF_analysis[10*7+3].data[j][i] / 1000.; // in km/s
+										BVF_analysis_e[10*7+3].data[j][i] = BVF_analysis_e[10*7+3].data[j][i] / 1000.; // in km/s
+										BVF_analysis[10*7+_ng2+0].data[j][i] = 1E90;
+										BVF_analysis[10*7+_ng2+1].data[j][i] = 1E90;
+										BVF_analysis_e[10*7+_ng2+0].data[j][i] = 1E90;
+										BVF_analysis_e[10*7+_ng2+1].data[j][i] = 1E90;
+								}
+
+								/*
+								if(opt_gauss_number == 1 && // if optimal_n_gauss == 1
+									fabs(gfit_params_mpi[0].data[i][j][opt_gauss_number-1][0][3]-1E3*HI_VF[0].data[j][i]) > vel_bulk_limit && // in m/s
+									gfit_params_mpi[0].data[i][j][opt_gauss_number-1][0][2] > channel_resolution &&  // sigma > 1 channel
+									gfit_params_mpi[0].data[i][j][opt_gauss_number-1][0][7] > sn_profile_limit) // s/n > sn_profile_limit
+								{
+									for(_ng2=0; _ng2<8; _ng2++)
+									{
+										// 0:background, 1:amplitude, 2:sigma, 3:centre, 4:bic, 5:none(opt-N-gauss), 6:std, 7:s/n
+										BVF_analysis[10*7+_ng2].data[j][i] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_weak_nonc][_ng2];
+										BVF_analysis_e[10*7+_ng2].data[j][i] = gfit_params_e_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_weak_nonc][_ng2];
+									}
+										BVF_analysis[10*7+2].data[j][i] = BVF_analysis[10*7+2].data[j][i] / 1000.; // in km/s
+										BVF_analysis_e[10*7+2].data[j][i] = BVF_analysis_e[10*7+2].data[j][i] / 1000.; // in km/s
+										BVF_analysis[10*7+3].data[j][i] = BVF_analysis[10*7+3].data[j][i] / 1000.; // in km/s
+										BVF_analysis_e[10*7+3].data[j][i] = BVF_analysis_e[10*7+3].data[j][i] / 1000.; // in km/s
+										BVF_analysis[10*7+_ng2+0].data[j][i] = 1E90;
+										BVF_analysis[10*7+_ng2+1].data[j][i] = 1E90;
+										BVF_analysis_e[10*7+_ng2+0].data[j][i] = 1E90;
+										BVF_analysis_e[10*7+_ng2+1].data[j][i] = 1E90;
+								}
+								*/
+							}
+
+							// *****************************************************************************************
+							// 9. HVC gaussian component [80 ~ 89] : (1) del_v > vesc_limit; (2) sigma > 1 channel; (3) s/n > sn_profile_limit;
+							// *****************************************************************************************
+							if(opt_gauss_number == 1)
+							{
+								gauss_number_hvc = 0;
+								if(fabs(gfit_params_mpi[0].data[i][j][0][0][3] - 1E3*HI_VF[0].data[j][i]) > vesc_limit) // if not the bulk motion
+								{
+									if(gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_hvc][2] > channel_resolution &&  // sigma > 1 channel
+										gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_hvc][7] > sn_profile_limit) // s/n > sn_profile_limit
+									{
+										for(_ng2=0; _ng2<8; _ng2++)
+										{
+											// 0:background, 1:amplitude, 2:sigma, 3:centre, 4:bic, 5:none(opt-N-gauss), 6:std, 7:s/n
+											BVF_analysis[10*8+_ng2].data[j][i] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_hvc][_ng2];
+											BVF_analysis_e[10*8+_ng2].data[j][i] = gfit_params_e_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_hvc][_ng2];
+										}
+											BVF_analysis[10*8+2].data[j][i] = BVF_analysis[10*8+2].data[j][i] / 1000.; // in km/s
+											BVF_analysis_e[10*8+2].data[j][i] = BVF_analysis_e[10*8+2].data[j][i] / 1000.; // in km/s
+											BVF_analysis[10*8+3].data[j][i] = BVF_analysis[10*8+3].data[j][i] / 1000.; // in km/s
+											BVF_analysis_e[10*8+3].data[j][i] = BVF_analysis_e[10*8+3].data[j][i] / 1000.; // in km/s
+											BVF_analysis[10*8+_ng2+0].data[j][i] = 1E90;
+											BVF_analysis[10*8+_ng2+1].data[j][i] = 1E90;
+											BVF_analysis_e[10*8+_ng2+0].data[j][i] = 1E90;
+											BVF_analysis_e[10*8+_ng2+1].data[j][i] = 1E90;
+									}
+								}
+							}
+							else
+							{
+								gauss_number_hvc = vel_gauss_n_sort[opt_gauss_number-1][0]; // sorted as above // gaussian component number whose amp is the biggest among the optimally decomposed ones...
+								if(fabs(gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_hvc][3] - 1E3*HI_VF[0].data[j][i]) > vesc_limit) // if not the bulk motion
+								{
+									if(gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_hvc][2] > channel_resolution &&  // sigma > 1 channel
+										gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_hvc][7] > sn_profile_limit) // s/n > sn_profile_limit
+									{
+										for(_ng2=0; _ng2<8; _ng2++)
+										{
+											// 0:background, 1:amplitude, 2:sigma, 3:centre, 4:bic, 5:none(opt-N-gauss), 6:std, 7:s/n
+											BVF_analysis[10*8+_ng2].data[j][i] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_hvc][_ng2];
+											BVF_analysis_e[10*8+_ng2].data[j][i] = gfit_params_e_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_hvc][_ng2];
+										}
+											BVF_analysis[10*8+2].data[j][i] = BVF_analysis[10*8+2].data[j][i] / 1000.; // in km/s
+											BVF_analysis_e[10*8+2].data[j][i] = BVF_analysis_e[10*8+2].data[j][i] / 1000.; // in km/s
+											BVF_analysis[10*8+3].data[j][i] = BVF_analysis[10*8+3].data[j][i] / 1000.; // in km/s
+											BVF_analysis_e[10*8+3].data[j][i] = BVF_analysis_e[10*8+3].data[j][i] / 1000.; // in km/s
+											BVF_analysis[10*8+_ng2+0].data[j][i] = 1E90;
+											BVF_analysis[10*8+_ng2+1].data[j][i] = 1E90;
+											BVF_analysis_e[10*8+_ng2+0].data[j][i] = 1E90;
+											BVF_analysis_e[10*8+_ng2+1].data[j][i] = 1E90;
+									}
+								}
+							}
+						}
+						// ++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						// ++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						// ++++++++++++++++++++++++++++++++++++++++++++++++++++++
+						// slicing all the fit results from multiple gaussian fits
+						for(_ng=0; _ng<opt_gauss_number; _ng++)
+						{
+							for(_ng1=0; _ng1<10; _ng1++)
+							{
+								BVF[_ng*10 + _ng1].data[j][i] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][_ng1];
+								BVF_e[_ng*10 + _ng1].data[j][i] = gfit_params_e_mpi[0].data[i][j][opt_gauss_number-1][_ng][_ng1];
+							}
+						}
+					}
+					else if(gfit_params_mpi[0].data[i][j][0][0][5] == -1) // at least one of the multinest runs failed... just save the single gaussian fit results
+					{
 						// *****************************************************************************************
 						// 3. default single gaussian fit [20 ~ 29] : (1) optimal_n_gauss > 1; (2) sigma > 1 channel; (3) s/n > sn_profile_limit
 						// *****************************************************************************************
+						//printf("%d %d %f %f %d\n", i, j, gfit_params_mpi[0].data[i][j][0][0][2], gfit_params_mpi[0].data[i][j][0][0][7], opt_gauss_number);
 						if(gfit_params_mpi[0].data[i][j][0][0][2] > channel_resolution &&  // sigma > 1 channel
 							gfit_params_mpi[0].data[i][j][0][0][7] > sn_profile_limit) // s/n > sn_profile_limit
 						{
@@ -641,252 +926,6 @@ nlx2(2) |__|__|  x nax3(5)
 								BVF_analysis_e[10*2+_ng2+0].data[j][i] = 1E90;
 								BVF_analysis_e[10*2+_ng2+1].data[j][i] = 1E90;
 						}
-
-						// *****************************************************************************************
-						// 4. primary gaussian component [30 ~ 39] : (1) ; (2) sigma > 1 channel; (3) s/n > sn_profile_limit ; (4) amp is the largest
-						// *****************************************************************************************
-						gauss_number_primary = amp_sort[opt_gauss_number-1][0]; // sorted as above // gaussian component number whose amp is the biggest among the optimally decomposed ones...
-						if(opt_gauss_number > 1 && // at least the number of gaussian is larger than 1
-							gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_primary][2] > channel_resolution &&  // sigma > 1 channel
-							gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_primary][7] > sn_profile_limit) // s/n > sn_profile_limit
-						{
-							for(_ng2=0; _ng2<8; _ng2++)
-							{
-								// 0:background, 1:amplitude, 2:sigma, 3:centre, 4:bic, 5:none(opt-N-gauss), 6:std, 7:s/n
-								BVF_analysis[10*3+_ng2].data[j][i] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_primary][_ng2];
-								BVF_analysis_e[10*3+_ng2].data[j][i] = gfit_params_e_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_primary][_ng2];
-							}
-								BVF_analysis[10*3+2].data[j][i] = BVF_analysis[10*3+2].data[j][i] / 1000.; // in km/s
-								BVF_analysis_e[10*3+2].data[j][i] = BVF_analysis_e[10*3+2].data[j][i] / 1000.; // in km/s
-								BVF_analysis[10*3+3].data[j][i] = BVF_analysis[10*3+3].data[j][i] / 1000.; // in km/s
-								BVF_analysis_e[10*3+3].data[j][i] = BVF_analysis_e[10*3+3].data[j][i] / 1000.; // in km/s
-								BVF_analysis[10*3+_ng2+0].data[j][i] = 1E90;
-								BVF_analysis[10*3+_ng2+1].data[j][i] = 1E90;
-								BVF_analysis_e[10*3+_ng2+0].data[j][i] = 1E90;
-								BVF_analysis_e[10*3+_ng2+1].data[j][i] = 1E90;
-						}
-
-						// *****************************************************************************************
-						// 5. cold gaussian component [40 ~ 49] : (1) opt_gauss_number > 1; (2) sigma1 & sigma2 > 1 channel + sigma1 < sigma2; (3) s/n > sn_profile_limit;
-						// *****************************************************************************************
-						gauss_number_cold = disp_sort[0][0]; // sorted as above // gaussian component number whose dispersion is the smallest among the optimally decomposed ones...
-						if(opt_gauss_number > 1 && // at least the number of gaussian is larger than 1
-							gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_cold][2] > channel_resolution &&  // sigma > 1 channel
-							gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_cold][7] > sn_profile_limit) // s/n > sn_profile_limit
-						{
-							for(_ng2=0; _ng2<8; _ng2++)
-							{
-								// 0:background, 1:amplitude, 2:sigma, 3:centre, 4:bic, 5:none(opt-N-gauss), 6:std, 7:s/n
-								BVF_analysis[10*4+_ng2].data[j][i] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_cold][_ng2];
-								BVF_analysis_e[10*4+_ng2].data[j][i] = gfit_params_e_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_cold][_ng2];
-							}
-								BVF_analysis[10*4+2].data[j][i] = BVF_analysis[10*4+2].data[j][i] / 1000.; // in km/s
-								BVF_analysis_e[10*4+2].data[j][i] = BVF_analysis_e[10*4+2].data[j][i] / 1000.; // in km/s
-								BVF_analysis[10*4+3].data[j][i] = BVF_analysis[10*4+3].data[j][i] / 1000.; // in km/s
-								BVF_analysis_e[10*4+3].data[j][i] = BVF_analysis_e[10*4+3].data[j][i] / 1000.; // in km/s
-								BVF_analysis[10*4+_ng2+0].data[j][i] = 1E90;
-								BVF_analysis[10*4+_ng2+1].data[j][i] = 1E90;
-								BVF_analysis_e[10*4+_ng2+0].data[j][i] = 1E90;
-								BVF_analysis_e[10*4+_ng2+1].data[j][i] = 1E90;
-						}
-
-						// *****************************************************************************************
-						// 6. warm gaussian component [50 ~ 59] : (1) opt_gauss_number > 1; (2) sigma1 & sigma2 > 1 channel + sigma1 > sigma2; (3) s/n > sn_profile_limit;
-						// *****************************************************************************************
-						gauss_number_warm = disp_sort[opt_gauss_number-1][0]; // sorted as above // gaussian component number whose dispersion is the largest among the optimally decomposed ones...
-						if(opt_gauss_number > 1 && // at least the number of gaussian is larger than 1
-							gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_warm][2] > channel_resolution &&  // sigma > 1 channel
-							gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_warm][7] > sn_profile_limit) // s/n > sn_profile_limit
-						{
-							for(_ng2=0; _ng2<8; _ng2++)
-							{
-								// 0:background, 1:amplitude, 2:sigma, 3:centre, 4:bic, 5:none(opt-N-gauss), 6:std, 7:s/n
-								BVF_analysis[10*5+_ng2].data[j][i] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_warm][_ng2];
-								BVF_analysis_e[10*5+_ng2].data[j][i] = gfit_params_e_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_warm][_ng2];
-							}
-								BVF_analysis[10*5+2].data[j][i] = BVF_analysis[10*5+2].data[j][i] / 1000.; // in km/s
-								BVF_analysis_e[10*5+2].data[j][i] = BVF_analysis_e[10*5+2].data[j][i] / 1000.; // in km/s
-								BVF_analysis[10*5+3].data[j][i] = BVF_analysis[10*5+3].data[j][i] / 1000.; // in km/s
-								BVF_analysis_e[10*5+3].data[j][i] = BVF_analysis_e[10*5+3].data[j][i] / 1000.; // in km/s
-								BVF_analysis[10*5+_ng2+0].data[j][i] = 1E90;
-								BVF_analysis[10*5+_ng2+1].data[j][i] = 1E90;
-								BVF_analysis_e[10*5+_ng2+0].data[j][i] = 1E90;
-								BVF_analysis_e[10*5+_ng2+1].data[j][i] = 1E90;
-						}
-
-						// *****************************************************************************************
-						// 7. strong nonc. gaussian component [60 ~ 69] : (1) opt_gauss_number > 1; (2) not the bulk but the primary; (3) sigma > 1 channel; (4) s/n > sn_profile_limit;
-						// *****************************************************************************************
-						// first, find the primary
-						gauss_number_primary = amp_sort[opt_gauss_number-1][0]; // sorted as above // gaussian component number whose amp is the biggest among the optimally decomposed ones...
-						// second, check it the primary is bulk motion whether or not...
-						if(fabs(gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_primary][3] - vel_sort[0][0]) > 0.1) // if not the bulk motion
-						{
-							gauss_number_strong_nonc = gauss_number_primary; // sorted as above // gaussian component number whose velocitiy deviation is the largest from the bulk among the optimally decomposed ones...
-							if(opt_gauss_number > 1 && // at least the number of gaussian is larger than 1
-								gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_strong_nonc][2] > channel_resolution &&  // sigma > 1 channel
-								gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_strong_nonc][7] > sn_profile_limit) // s/n > sn_profile_limit
-							{
-								for(_ng2=0; _ng2<8; _ng2++)
-								{
-									// 0:background, 1:amplitude, 2:sigma, 3:centre, 4:bic, 5:none(opt-N-gauss), 6:std, 7:s/n
-									BVF_analysis[10*6+_ng2].data[j][i] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_strong_nonc][_ng2];
-									BVF_analysis_e[10*6+_ng2].data[j][i] = gfit_params_e_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_strong_nonc][_ng2];
-								}
-									BVF_analysis[10*6+2].data[j][i] = BVF_analysis[10*6+2].data[j][i] / 1000.; // in km/s
-									BVF_analysis_e[10*6+2].data[j][i] = BVF_analysis_e[10*6+2].data[j][i] / 1000.; // in km/s
-									BVF_analysis[10*6+3].data[j][i] = BVF_analysis[10*6+3].data[j][i] / 1000.; // in km/s
-									BVF_analysis_e[10*6+3].data[j][i] = BVF_analysis_e[10*6+3].data[j][i] / 1000.; // in km/s
-									BVF_analysis[10*6+_ng2+0].data[j][i] = 1E90;
-									BVF_analysis[10*6+_ng2+1].data[j][i] = 1E90;
-									BVF_analysis_e[10*6+_ng2+0].data[j][i] = 1E90;
-									BVF_analysis_e[10*6+_ng2+1].data[j][i] = 1E90;
-							}
-
-							/*
-							if(opt_gauss_number == 1 && // if optimal_n_gauss == 1
-								fabs(gfit_params_mpi[0].data[i][j][opt_gauss_number-1][0][3]-1E3*HI_VF[0].data[j][i]) > vel_bulk_limit && // in m/s
-								gfit_params_mpi[0].data[i][j][opt_gauss_number-1][0][2] > channel_resolution &&  // sigma > 1 channel
-								gfit_params_mpi[0].data[i][j][opt_gauss_number-1][0][7] > sn_profile_limit) // s/n > sn_profile_limit
-							{
-								for(_ng2=0; _ng2<8; _ng2++)
-								{
-									// 0:background, 1:amplitude, 2:sigma, 3:centre, 4:bic, 5:none(opt-N-gauss), 6:std, 7:s/n
-									BVF_analysis[10*6+_ng2].data[j][i] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_strong_nonc][_ng2];
-									BVF_analysis_e[10*6+_ng2].data[j][i] = gfit_params_e_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_strong_nonc][_ng2];
-								}
-									BVF_analysis[10*6+2].data[j][i] = BVF_analysis[10*6+2].data[j][i] / 1000.; // in km/s
-									BVF_analysis_e[10*6+2].data[j][i] = BVF_analysis_e[10*6+2].data[j][i] / 1000.; // in km/s
-									BVF_analysis[10*6+3].data[j][i] = BVF_analysis[10*6+3].data[j][i] / 1000.; // in km/s
-									BVF_analysis_e[10*6+3].data[j][i] = BVF_analysis_e[10*6+3].data[j][i] / 1000.; // in km/s
-									BVF_analysis[10*6+_ng2+0].data[j][i] = 1E90;
-									BVF_analysis[10*6+_ng2+1].data[j][i] = 1E90;
-									BVF_analysis_e[10*6+_ng2+0].data[j][i] = 1E90;
-									BVF_analysis_e[10*6+_ng2+1].data[j][i] = 1E90;
-							}
-							*/
-						}
-
-						// *****************************************************************************************
-						// 8. weak nonc. gaussian component [70 ~ 79] : (1) opt_gauss_number > 1; (2) not the bulk but the secondary (3) sigma > 1 channel; (4) s/n > sn_profile_limit;
-						// *****************************************************************************************
-						// first, find the primary
-						gauss_number_lowest = amp_sort[0][0]; // sorted as above // gaussian component number whose amp is the lowest among the optimally decomposed ones...
-						// second, check it the lowest is bulk motion whether or not...
-						if(fabs(gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_lowest][3] - vel_sort[0][0]) > 0.1) // if not the bulk motion
-						{
-							gauss_number_weak_nonc = gauss_number_lowest; // sorted as above // gaussian component number whose velocitiy deviation is the largest from the bulk among the optimally decomposed ones...
-							if(opt_gauss_number > 1 && // at least the number of gaussian is larger than 1
-								gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_weak_nonc][2] > channel_resolution &&  // sigma > 1 channel
-								gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_weak_nonc][7] > sn_profile_limit) // s/n > sn_profile_limit
-							{
-								for(_ng2=0; _ng2<8; _ng2++)
-								{
-									// 0:background, 1:amplitude, 2:sigma, 3:centre, 4:bic, 5:none(opt-N-gauss), 6:std, 7:s/n
-									BVF_analysis[10*7+_ng2].data[j][i] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_weak_nonc][_ng2];
-									BVF_analysis_e[10*7+_ng2].data[j][i] = gfit_params_e_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_weak_nonc][_ng2];
-								}
-									BVF_analysis[10*7+2].data[j][i] = BVF_analysis[10*7+2].data[j][i] / 1000.; // in km/s
-									BVF_analysis_e[10*7+2].data[j][i] = BVF_analysis_e[10*7+2].data[j][i] / 1000.; // in km/s
-									BVF_analysis[10*7+3].data[j][i] = BVF_analysis[10*7+3].data[j][i] / 1000.; // in km/s
-									BVF_analysis_e[10*7+3].data[j][i] = BVF_analysis_e[10*7+3].data[j][i] / 1000.; // in km/s
-									BVF_analysis[10*7+_ng2+0].data[j][i] = 1E90;
-									BVF_analysis[10*7+_ng2+1].data[j][i] = 1E90;
-									BVF_analysis_e[10*7+_ng2+0].data[j][i] = 1E90;
-									BVF_analysis_e[10*7+_ng2+1].data[j][i] = 1E90;
-							}
-
-							/*
-							if(opt_gauss_number == 1 && // if optimal_n_gauss == 1
-								fabs(gfit_params_mpi[0].data[i][j][opt_gauss_number-1][0][3]-1E3*HI_VF[0].data[j][i]) > vel_bulk_limit && // in m/s
-								gfit_params_mpi[0].data[i][j][opt_gauss_number-1][0][2] > channel_resolution &&  // sigma > 1 channel
-								gfit_params_mpi[0].data[i][j][opt_gauss_number-1][0][7] > sn_profile_limit) // s/n > sn_profile_limit
-							{
-								for(_ng2=0; _ng2<8; _ng2++)
-								{
-									// 0:background, 1:amplitude, 2:sigma, 3:centre, 4:bic, 5:none(opt-N-gauss), 6:std, 7:s/n
-									BVF_analysis[10*7+_ng2].data[j][i] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_weak_nonc][_ng2];
-									BVF_analysis_e[10*7+_ng2].data[j][i] = gfit_params_e_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_weak_nonc][_ng2];
-								}
-									BVF_analysis[10*7+2].data[j][i] = BVF_analysis[10*7+2].data[j][i] / 1000.; // in km/s
-									BVF_analysis_e[10*7+2].data[j][i] = BVF_analysis_e[10*7+2].data[j][i] / 1000.; // in km/s
-									BVF_analysis[10*7+3].data[j][i] = BVF_analysis[10*7+3].data[j][i] / 1000.; // in km/s
-									BVF_analysis_e[10*7+3].data[j][i] = BVF_analysis_e[10*7+3].data[j][i] / 1000.; // in km/s
-									BVF_analysis[10*7+_ng2+0].data[j][i] = 1E90;
-									BVF_analysis[10*7+_ng2+1].data[j][i] = 1E90;
-									BVF_analysis_e[10*7+_ng2+0].data[j][i] = 1E90;
-									BVF_analysis_e[10*7+_ng2+1].data[j][i] = 1E90;
-							}
-							*/
-						}
-
-						// *****************************************************************************************
-						// 9. HVC gaussian component [80 ~ 89] : (1) del_v > vesc_limit; (2) sigma > 1 channel; (3) s/n > sn_profile_limit;
-						// *****************************************************************************************
-						if(opt_gauss_number == 1)
-						{
-							gauss_number_hvc = 0;
-							if(fabs(gfit_params_mpi[0].data[i][j][0][0][3] - 1E3*HI_VF[0].data[j][i]) > vesc_limit) // if not the bulk motion
-							{
-								if(gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_hvc][2] > channel_resolution &&  // sigma > 1 channel
-									gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_hvc][7] > sn_profile_limit) // s/n > sn_profile_limit
-								{
-									for(_ng2=0; _ng2<8; _ng2++)
-									{
-										// 0:background, 1:amplitude, 2:sigma, 3:centre, 4:bic, 5:none(opt-N-gauss), 6:std, 7:s/n
-										BVF_analysis[10*8+_ng2].data[j][i] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_hvc][_ng2];
-										BVF_analysis_e[10*8+_ng2].data[j][i] = gfit_params_e_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_hvc][_ng2];
-									}
-										BVF_analysis[10*8+2].data[j][i] = BVF_analysis[10*8+2].data[j][i] / 1000.; // in km/s
-										BVF_analysis_e[10*8+2].data[j][i] = BVF_analysis_e[10*8+2].data[j][i] / 1000.; // in km/s
-										BVF_analysis[10*8+3].data[j][i] = BVF_analysis[10*8+3].data[j][i] / 1000.; // in km/s
-										BVF_analysis_e[10*8+3].data[j][i] = BVF_analysis_e[10*8+3].data[j][i] / 1000.; // in km/s
-										BVF_analysis[10*8+_ng2+0].data[j][i] = 1E90;
-										BVF_analysis[10*8+_ng2+1].data[j][i] = 1E90;
-										BVF_analysis_e[10*8+_ng2+0].data[j][i] = 1E90;
-										BVF_analysis_e[10*8+_ng2+1].data[j][i] = 1E90;
-								}
-							}
-						}
-						else
-						{
-							gauss_number_hvc = vel_gauss_n_sort[opt_gauss_number-1][0]; // sorted as above // gaussian component number whose amp is the biggest among the optimally decomposed ones...
-							if(fabs(gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_hvc][3] - 1E3*HI_VF[0].data[j][i]) > vesc_limit) // if not the bulk motion
-							{
-								if(gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_hvc][2] > channel_resolution &&  // sigma > 1 channel
-									gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_hvc][7] > sn_profile_limit) // s/n > sn_profile_limit
-								{
-									for(_ng2=0; _ng2<8; _ng2++)
-									{
-										// 0:background, 1:amplitude, 2:sigma, 3:centre, 4:bic, 5:none(opt-N-gauss), 6:std, 7:s/n
-										BVF_analysis[10*8+_ng2].data[j][i] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_hvc][_ng2];
-										BVF_analysis_e[10*8+_ng2].data[j][i] = gfit_params_e_mpi[0].data[i][j][opt_gauss_number-1][gauss_number_hvc][_ng2];
-									}
-										BVF_analysis[10*8+2].data[j][i] = BVF_analysis[10*8+2].data[j][i] / 1000.; // in km/s
-										BVF_analysis_e[10*8+2].data[j][i] = BVF_analysis_e[10*8+2].data[j][i] / 1000.; // in km/s
-										BVF_analysis[10*8+3].data[j][i] = BVF_analysis[10*8+3].data[j][i] / 1000.; // in km/s
-										BVF_analysis_e[10*8+3].data[j][i] = BVF_analysis_e[10*8+3].data[j][i] / 1000.; // in km/s
-										BVF_analysis[10*8+_ng2+0].data[j][i] = 1E90;
-										BVF_analysis[10*8+_ng2+1].data[j][i] = 1E90;
-										BVF_analysis_e[10*8+_ng2+0].data[j][i] = 1E90;
-										BVF_analysis_e[10*8+_ng2+1].data[j][i] = 1E90;
-								}
-							}
-						}
-
-					}
-
-					// ++++++++++++++++++++++++++++++++++++++++++++++++++++++
-					// ++++++++++++++++++++++++++++++++++++++++++++++++++++++
-					// ++++++++++++++++++++++++++++++++++++++++++++++++++++++
-					// slicing all the fit results from multiple gaussian fits
-					for(_ng=0; _ng<opt_gauss_number; _ng++)
-					{
-						for(_ng1=0; _ng1<10; _ng1++)
-						{
-							BVF[_ng*10 + _ng1].data[j][i] = gfit_params_mpi[0].data[i][j][opt_gauss_number-1][_ng][_ng1];
-							BVF_e[_ng*10 + _ng1].data[j][i] = gfit_params_e_mpi[0].data[i][j][opt_gauss_number-1][_ng][_ng1];
-						}
 					}
 				}
 			}
@@ -900,6 +939,7 @@ nlx2(2) |__|__|  x nax3(5)
 			//for(j=0; j<TRparam[0].nax2; j++)
 			for(j=ylower; j<yupper; j++)
 			{
+				opt_gauss_number = (int)gfit_params_mpi[0].data[i][j][0][0][5];
 				if(!isinf(raw_cube_mpi[0].data[i][j][0]) && !isnan(raw_cube_mpi[0].data[i][j][TRparam[0].nax3-1]) && !isinf(HI_VF[0].data[j][i]) && !isnan(HI_VF[0].data[j][i]))
 				{
 					// extract _boxfilter
@@ -938,8 +978,9 @@ nlx2(2) |__|__|  x nax3(5)
 				}
 			}
 		}
+		printf("[completed]\n");
 
-
+		printf("-> Write FITS... ");
 		// make directories if not exist
 		sprintf(dirname, "%s/%s", argv[1], argv[9]);
 		if(stat(dirname, &st) != 0)
@@ -1128,6 +1169,7 @@ nlx2(2) |__|__|  x nax3(5)
 				save_2dmapsfits(fptr_2d_refvf, fname[0].fitsfile_trfit_model, &fname[0].fitsfile_bvf_e[_ng][i], TRparam[0].nax1, TRparam[0].nax2, &BVF_e[_ng*10 + i]);
 			}
 		}
+		printf("[completed]\n\n");
 
 /*
 i0 = xlower;
